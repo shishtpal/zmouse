@@ -159,6 +159,7 @@ fn executePlay(sw: c_int, sh: c_int) void {
 
         // Execute the event
         switch (event.event_type) {
+            // Mouse events
             .move => mouse.moveMouse(event.x, event.y, sw, sh),
             .left_down => mouse.clickButton(win32.MOUSEEVENTF_LEFTDOWN, 0),
             .left_up => mouse.clickButton(0, win32.MOUSEEVENTF_LEFTUP),
@@ -169,6 +170,9 @@ fn executePlay(sw: c_int, sh: c_int) void {
                 const scroll_amount = @divTrunc(event.data, win32.WHEEL_DELTA);
                 mouse.scrollWheel(scroll_amount);
             },
+            // Keyboard events
+            .key_down => mouse.sendKey(@intCast(event.data), false),
+            .key_up => mouse.sendKey(@intCast(event.data), true),
         }
     }
 

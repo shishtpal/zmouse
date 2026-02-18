@@ -66,7 +66,8 @@ pub fn saveEvents(events: []const recorder.MouseEvent, filepath: []const u8, all
         try appendInt(&json_buf, alloc, event.x);
         try json_buf.appendSlice(alloc, ", \"y\": ");
         try appendInt(&json_buf, alloc, event.y);
-        if (event.event_type == .wheel) {
+        // Include data field for wheel and keyboard events
+        if (event.event_type == .wheel or event.event_type == .key_down or event.event_type == .key_up) {
             try json_buf.appendSlice(alloc, ", \"data\": ");
             try appendInt(&json_buf, alloc, event.data);
         }

@@ -23,6 +23,7 @@ pub const WHEEL_DELTA: i32 = 120;
 
 // Hook constants
 pub const WH_MOUSE_LL: c_int = 14;
+pub const WH_KEYBOARD_LL: c_int = 13;
 
 // Mouse message constants
 pub const WM_MOUSEMOVE: u32 = 0x0200;
@@ -31,6 +32,16 @@ pub const WM_LBUTTONUP: u32 = 0x0202;
 pub const WM_RBUTTONDOWN: u32 = 0x0204;
 pub const WM_RBUTTONUP: u32 = 0x0205;
 pub const WM_MOUSEWHEEL: u32 = 0x020A;
+
+// Keyboard message constants
+pub const WM_KEYDOWN: u32 = 0x0100;
+pub const WM_KEYUP: u32 = 0x0101;
+pub const WM_SYSKEYDOWN: u32 = 0x0104;
+pub const WM_SYSKEYUP: u32 = 0x0105;
+
+// Keyboard input constants
+pub const INPUT_KEYBOARD: u32 = 1;
+pub const KEYEVENTF_KEYUP: u32 = 0x0002;
 
 // Message loop constants
 pub const PM_REMOVE: u32 = 0x0001;
@@ -53,12 +64,14 @@ pub const MOUSEINPUT = extern struct {
     dwExtraInfo: usize = 0,
 };
 
-/// We only ever send mouse events, so we embed MOUSEINPUT directly.
-/// MOUSEINPUT is the largest union member in the real Win32 INPUT struct,
-/// so the sizes match.
+/// INPUT struct for SendInput - supports both mouse and keyboard input.
+/// Uses a union to handle different input types.
 pub const INPUT = extern struct {
     input_type: u32 = 0, // "type" is a Zig keyword, renamed here
-    mi: MOUSEINPUT = .{},
+    data: extern union {
+        mi: MOUSEINPUT,
+        ki: KEYBDINPUT,
+    } = .{ .mi = .{} },
 };
 
 // Compile-time proof that our struct matches the Win32 layout.
@@ -100,6 +113,22 @@ pub const MSLLHOOKSTRUCT = extern struct {
     flags: u32,
     time: u32,
     dwExtraInfo: usize,
+};
+
+pub const KBDLLHOOKSTRUCT = extern struct {
+    vkCode: u32,
+    scanCode: u32,
+    flags: u32,
+    time: u32,
+    dwExtraInfo: usize,
+};
+
+pub const KEYBDINPUT = extern struct {
+    wVk: u16 = 0,
+    wScan: u16 = 0,
+    dwFlags: u32 = 0,
+    time: u32 = 0,
+    dwExtraInfo: usize = 0,
 };
 
 pub const MSG = extern struct {

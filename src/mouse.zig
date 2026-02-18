@@ -8,11 +8,11 @@ const coord = @import("coordinates.zig");
 pub fn moveMouse(x: i32, y: i32, screen_width: c_int, screen_height: c_int) void {
     var buf = [1]win32.INPUT{.{
         .input_type = win32.INPUT_MOUSE,
-        .mi = .{
+        .data = .{ .mi = .{
             .dx = coord.toAbsoluteX(x, screen_width),
             .dy = coord.toAbsoluteY(y, screen_height),
             .dwFlags = win32.MOUSEEVENTF_MOVE | win32.MOUSEEVENTF_ABSOLUTE,
-        },
+        } },
     }};
     _ = win32.SendInput(1, &buf, @sizeOf(win32.INPUT));
 }
@@ -20,8 +20,8 @@ pub fn moveMouse(x: i32, y: i32, screen_width: c_int, screen_height: c_int) void
 /// Click a mouse button (down and up)
 pub fn clickButton(down_flag: u32, up_flag: u32) void {
     var buf = [2]win32.INPUT{
-        .{ .input_type = win32.INPUT_MOUSE, .mi = .{ .dwFlags = down_flag } },
-        .{ .input_type = win32.INPUT_MOUSE, .mi = .{ .dwFlags = up_flag } },
+        .{ .input_type = win32.INPUT_MOUSE, .data = .{ .mi = .{ .dwFlags = down_flag } } },
+        .{ .input_type = win32.INPUT_MOUSE, .data = .{ .mi = .{ .dwFlags = up_flag } } },
     };
     _ = win32.SendInput(2, &buf, @sizeOf(win32.INPUT));
 }
@@ -46,12 +46,24 @@ pub fn doubleClick() void {
 pub fn scrollWheel(amount: i32) void {
     var buf = [1]win32.INPUT{.{
         .input_type = win32.INPUT_MOUSE,
-        .mi = .{
+        .data = .{ .mi = .{
             // mouseData is DWORD but the wheel value is signed;
             // @bitCast reinterprets the i32 bits as u32.
             .mouseData = @bitCast(amount * win32.WHEEL_DELTA),
             .dwFlags = win32.MOUSEEVENTF_WHEEL,
-        },
+        } },
+    }};
+    _ = win32.SendInput(1, &buf, @sizeOf(win32.INPUT));
+}
+
+/// Send a key press or release
+pub fn sendKey(vk: u16, key_up: bool) void {
+    var buf = [1]win32.INPUT{.{
+        .input_type = win32.INPUT_KEYBOARD,
+        .data = .{ .ki = .{
+            .wVk = vk,
+            .dwFlags = if (key_up) win32.KEYEVENTF_KEYUP else 0,
+        } },
     }};
     _ = win32.SendInput(1, &buf, @sizeOf(win32.INPUT));
 }

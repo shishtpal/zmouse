@@ -4,14 +4,18 @@
 const std = @import("std");
 const win32 = @import("win32.zig");
 
-/// Types of mouse events that can be recorded
+/// Types of input events that can be recorded
 pub const EventType = enum {
+    // Mouse events
     move,
     left_down,
     left_up,
     right_down,
     right_up,
     wheel,
+    // Keyboard events
+    key_down,
+    key_up,
 
     pub fn toString(self: EventType) []const u8 {
         return switch (self) {
@@ -21,6 +25,8 @@ pub const EventType = enum {
             .right_down => "right_down",
             .right_up => "right_up",
             .wheel => "wheel",
+            .key_down => "key_down",
+            .key_up => "key_up",
         };
     }
 
@@ -31,6 +37,8 @@ pub const EventType = enum {
         if (std.mem.eql(u8, s, "right_down")) return .right_down;
         if (std.mem.eql(u8, s, "right_up")) return .right_up;
         if (std.mem.eql(u8, s, "wheel")) return .wheel;
+        if (std.mem.eql(u8, s, "key_down")) return .key_down;
+        if (std.mem.eql(u8, s, "key_up")) return .key_up;
         return null;
     }
 };
@@ -50,7 +58,8 @@ var allocator: std.mem.Allocator = undefined;
 var initialized: bool = false;
 var recording: bool = false;
 var start_time: u64 = 0;
-var hook: ?win32.HHOOK = null;
+var mouse_hook: ?win32.HHOOK = null;
+var keyboard_hook: ?win32.HHOOK = null;
 var hook_thread: ?win32.HANDLE = null;
 var stop_thread: bool = false;
 
@@ -102,14 +111,42 @@ fn mouseHookProc(nCode: c_int, wParam: usize, lParam: isize) callconv(.winapi) i
             }) catch {};
         }
     }
-    return win32.CallNextHookEx(hook, nCode, wParam, lParam);
+    return win32.CallNextHookEx(mouse_hook, nCode, wParam, lParam);
 }
 
-/// Thread function that runs the message pump for the hook
+/// Low-level keyboard hook callback
+fn keyboardHookProc(nCode: c_int, wParam: usize, lParam: isize) callconv(.winapi) isize {
+    if (nCode >= 0 and recording) {
+        const hook_struct: *win32.KBDLLHOOKSTRUCT = @ptrFromInt(@as(usize, @bitCast(lParam)));
+        const elapsed = win32.GetTickCount64() - start_time;
+
+        const event_type: ?EventType = switch (wParam) {
+            win32.WM_KEYDOWN, win32.WM_SYSKEYDOWN => .key_down,
+            win32.WM_KEYUP, win32.WM_SYSKEYUP => .key_up,
+            else => null,
+        };
+
+        if (event_type) |et| {
+            events.append(allocator, .{
+                .timestamp_ms = @intCast(elapsed),
+                .event_type = et,
+                .x = 0,
+                .y = 0,
+                .data = @intCast(hook_struct.vkCode),
+            }) catch {};
+        }
+    }
+    return win32.CallNextHookEx(keyboard_hook, nCode, wParam, lParam);
+}
+
+/// Thread function that runs the message pump for the hooks
 fn hookThreadProc(_: ?*anyopaque) callconv(.winapi) u32 {
-    // Install the hook in this thread
-    hook = win32.SetWindowsHookExW(win32.WH_MOUSE_LL, mouseHookProc, null, 0);
-    if (hook == null) {
+    // Install the mouse hook
+    mouse_hook = win32.SetWindowsHookExW(win32.WH_MOUSE_LL, mouseHookProc, null, 0);
+    // Install the keyboard hook
+    keyboard_hook = win32.SetWindowsHookExW(win32.WH_KEYBOARD_LL, keyboardHookProc, null, 0);
+
+    if (mouse_hook == null and keyboard_hook == null) {
         return 1;
     }
 
@@ -127,9 +164,13 @@ fn hookThreadProc(_: ?*anyopaque) callconv(.winapi) u32 {
     }
 
     // Unhook when done
-    if (hook) |h| {
+    if (mouse_hook) |h| {
         _ = win32.UnhookWindowsHookEx(h);
-        hook = null;
+        mouse_hook = null;
+    }
+    if (keyboard_hook) |h| {
+        _ = win32.UnhookWindowsHookEx(h);
+        keyboard_hook = null;
     }
 
     return 0;
