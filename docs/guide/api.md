@@ -12,12 +12,14 @@ zig build run -- --http
 zig build run -- --http 8080
 ```
 
-The server starts immediately and you'll see:
+The server starts and you'll see:
 
 ```
 HTTP server started on port 4000
 API endpoints: /api/position, /api/move, /api/click, /api/screenshot, etc.
 ```
+
+The HTTP server runs in non-blocking mode, so you can still use the CLI.
 
 ## Quick Examples
 
@@ -55,6 +57,35 @@ All responses are JSON:
 
 // Error
 {"error":"Missing x"}
+```
+
+## Library Usage
+
+```zig
+const zmouse = @import("zmouse");
+
+// Initialize
+const screen = try zmouse.input.getScreenDimensions();
+var recorder = zmouse.Recorder.init(allocator);
+defer recorder.deinit();
+
+// Create server
+var server = zmouse.Server.init(allocator, screen.width, screen.height, &recorder);
+defer server.deinit();
+
+// Start
+try server.start(4000);
+
+// Poll in your main loop
+while (running) {
+    if (server.isRunning()) {
+        server.poll();
+    }
+    // ... other work ...
+}
+
+// Stop
+server.stop();
 ```
 
 ## Next Steps

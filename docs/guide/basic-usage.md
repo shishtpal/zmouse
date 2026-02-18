@@ -11,7 +11,7 @@ zig build run
 You'll see a prompt where you can type commands:
 
 ```
-  Mouse Controller  (screen 1920 x 1080)
+  ZMouse v1.0  (screen 1920 x 1080)
   ─────────────────────────────────────
   m<X>-<Y>   move            c<X>-<Y>   move + left-click
   r<X>-<Y>   move + right    d<X>-<Y>   move + double-click
@@ -19,7 +19,7 @@ You'll see a prompt where you can type commands:
   g          get position    q          quit
 
   Recording:
-  rec           start recording mouse events
+  rec           start recording input events
   stop          stop recording
   save <file>   save events to JSON file
   load <file>   load events from JSON file
@@ -106,9 +106,30 @@ You'll see a prompt where you can type commands:
   Exiting...
 ```
 
+## HTTP Mode
+
+Start with HTTP API enabled:
+
+```bash
+zig build run -- --http
+```
+
+Output:
+```
+HTTP server started on port 4000
+API endpoints: /api/position, /api/move, /api/click, /api/screenshot, etc.
+
+  ZMouse v1.0  (screen 1920 x 1080)
+  ...
+>
+```
+
+Now you can control ZMouse via both CLI and HTTP simultaneously.
+
 ## Tips
 
 - Coordinates are in pixels, with (0,0) at top-left
 - Scroll units are multiples of 120 (WHEEL_DELTA)
 - Recording captures both mouse and keyboard events
 - Playback preserves original timing between events
+- HTTP server runs in non-blocking mode alongside CLI

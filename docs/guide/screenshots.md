@@ -1,85 +1,193 @@
 # Screenshots
 
-ZMouse can capture screenshots via the HTTP API.
+ZMouse can capture screenshots via HTTP API.
 
-## Basic Screenshot
+## HTTP Endpoint
 
+### GET /api/screenshot
+
+Capture the entire screen.
+
+**Binary response (default):**
 ```bash
 curl http://localhost:4000/api/screenshot > screenshot.bmp
 ```
 
-Returns a BMP image of the entire primary screen.
+Response:
+- Content-Type: `image/bmp`
+- Body: BMP image data
 
-## Base64 Screenshot
-
-For embedding in JSON or HTML:
-
+**Base64 response:**
 ```bash
 curl "http://localhost:4000/api/screenshot?base64"
 ```
 
-Returns:
-
+Response:
 ```json
-{
-  "image": "Qk1WQAAAAAAAD..."
-}
+{"image": "Qk1WQAAAAAAAD..."}
 ```
 
-Use in HTML:
+## Usage Examples
 
-```html
-<img src="data:image/bmp;base64,Qk1WQAAAAAAAD..." />
+### Download Screenshot (cURL)
+
+```bash
+# Save as BMP
+curl http://localhost:4000/api/screenshot > screenshot.bmp
+
+# Get as base64 JSON
+curl "http://localhost:4000/api/screenshot?base64"
 ```
 
-## Response Format
-
-| Format | Content-Type | Description |
-|--------|--------------|-------------|
-| Default | `image/bmp` | Binary BMP file |
-| `?base64` | `application/json` | JSON with base64-encoded image |
-
-## Example: JavaScript
+### JavaScript
 
 ```javascript
-// Get screenshot as blob
-async function getScreenshot() {
-  const response = await fetch('http://localhost:4000/api/screenshot');
-  const blob = await response.blob();
-  return blob;
-}
+// Download as blob
+const response = await fetch('http://localhost:4000/api/screenshot');
+const blob = await response.blob();
+const url = URL.createObjectURL(blob);
 
-// Get as base64 for display
-async function getScreenshotBase64() {
-  const response = await fetch('http://localhost:4000/api/screenshot?base64');
-  const data = await response.json();
-  return `data:image/bmp;base64,${data.image}`;
-}
-
-// Display in an img element
+// Display in img element
 const img = document.getElementById('screenshot');
-img.src = await getScreenshotBase64();
+img.src = url;
+
+// Or download
+const a = document.createElement('a');
+a.href = url;
+a.download = 'screenshot.bmp';
+a.click();
 ```
 
-## Example: Python
+### Python
 
 ```python
 import requests
-import base64
 
-# Save to file
+# Download binary
 response = requests.get('http://localhost:4000/api/screenshot')
 with open('screenshot.bmp', 'wb') as f:
     f.write(response.content)
 
 # Get as base64
 response = requests.get('http://localhost:4000/api/screenshot?base64')
-image_data = base64.b64decode(response.json()['image'])
+base64_data = response.json()['image']
+```
+
+## Library API
+
+```zig
+const zmouse = @import("zmouse");
+
+// Capture entire screen
+var shot = zmouse.screenshot.captureScreen(allocator) orelse {
+    // Handle error
+    return;
+};
+defer shot.deinit();
+
+// Access pixel data
+const width = shot.width;
+const height = shot.height;
+const pixels = shot.pixels;  // BGRA format
+
+// Encode as BMP
+const bmp_data = zmouse.screenshot.encodeBmp(&shot, allocator) orelse {
+    return;
+};
+defer allocator.free(bmp_data);
+
+// Write to file
+// (use std.fs or write manually)
+
+// Encode as base64
+const b64 = try zmouse.screenshot.encodeBase64(bmp_data, allocator);
+defer allocator.free(b64);
+```
+
+### Screenshot Struct
+
+```zig
+pub const Screenshot = struct {
+    width: u32,
+    height: u32,
+    pixels: []u8,  // BGRA format, 4 bytes per pixel
+    allocator: std.mem.Allocator,
+    
+    pub fn deinit(self: *Screenshot) void;
+};
+```
+
+### Functions
+
+```zig
+/// Capture entire screen
+pub fn captureScreen(allocator: Allocator) ?Screenshot
+
+/// Capture rectangular region
+pub fn captureRect(
+    allocator: Allocator,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32
+) ?Screenshot
+
+/// Encode screenshot as BMP (caller must free)
+pub fn encodeBmp(
+    screenshot: *const Screenshot,
+    allocator: Allocator
+) ?[]u8
+
+/// Encode bytes as base64 (caller must free)
+pub fn encodeBase64(
+    data: []const u8,
+    allocator: Allocator
+) ![]u8
 ```
 
 ## Technical Details
 
-- Captures the primary monitor only
-- Uses Win32 GDI for capture
-- Output format is BMP (32-bit BGRA)
-- No compression applied
+### Capture Method
+
+Screenshots use Windows GDI:
+1. `GetDC(NULL)` to get screen device context
+2. `CreateCompatibleDC` and `CreateCompatibleBitmap`
+3. `BitBlt` to copy screen pixels
+4. `GetDIBits` to retrieve pixel data
+
+### Pixel Format
+
+- Format: BGRA (Blue, Green, Red, Alpha)
+- 4 bytes per pixel
+- Origin: Top-left corner
+- Scanlines: Top to bottom
+
+### BMP Encoding
+
+Output is Windows BMP format:
+- 24-bit color (RGB, no alpha)
+- Uncompressed
+- Compatible with all image viewers
+
+## Error Handling
+
+The screenshot API returns `null` on failure:
+
+```zig
+const shot = zmouse.screenshot.captureScreen(allocator) orelse {
+    std.debug.print("Screenshot capture failed\n", .{});
+    return;
+};
+```
+
+Common failure reasons:
+- Insufficient memory
+- Display context unavailable
+- Bitmap creation failed
+
+## Performance
+
+- Capture is synchronous (blocks until complete)
+- Large screens (4K+) may take 50-100ms
+- Memory usage: ~4 bytes per pixel + BMP header
+- Example: 1920x1080 = ~8MB uncompressed

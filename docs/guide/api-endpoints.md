@@ -40,7 +40,7 @@ Move and click at coordinates.
 }
 ```
 
-**Button options:** `left`, `right`, `double`
+**Button options:** `left` (default), `right`, `double`
 
 **Response:**
 ```json
@@ -59,7 +59,7 @@ Scroll the mouse wheel.
 }
 ```
 
-**Direction options:** `up`, `down`
+**Direction options:** `up` (default), `down`
 
 **Response:**
 ```json
@@ -101,6 +101,7 @@ Capture screenshot.
 
 **Response (binary):**
 - Content-Type: `image/bmp`
+- Body: BMP image data
 
 **Response (base64):**
 ```json
@@ -128,6 +129,11 @@ Start recording.
 **Response:**
 ```json
 {"ok": true}
+```
+
+**Error (already recording):**
+```json
+{"error": "Could not start recording"}
 ```
 
 ### POST /api/recording/stop
@@ -185,6 +191,13 @@ Replay recorded events.
 {"ok": true}
 ```
 
+**Error (no events):**
+```json
+{"error": "No events to play"}
+```
+
+Note: Playback is blocking - the request won't return until playback is complete.
+
 ## System
 
 ### GET /
@@ -201,6 +214,8 @@ API information.
 
 ## Error Responses
 
+All errors return JSON with an `error` field:
+
 ```json
 {"error": "Missing x"}
 ```
@@ -208,6 +223,65 @@ API information.
 HTTP status codes:
 - `200` - Success
 - `400` - Bad request (missing/invalid parameters)
-- `404` - Not found
-- `405` - Method not allowed
+- `404` - Not found (unknown endpoint)
+- `405` - Method not allowed (wrong HTTP method)
 - `500` - Internal server error
+
+## Usage Examples
+
+### JavaScript (fetch)
+
+```javascript
+// Get position
+const pos = await fetch('http://localhost:4000/api/position')
+  .then(r => r.json());
+console.log(`Mouse at (${pos.x}, ${pos.y})`);
+
+// Move and click
+await fetch('http://localhost:4000/api/click', {
+  method: 'POST',
+  body: JSON.stringify({ x: 100, y: 100, button: 'left' })
+});
+
+// Get screenshot as blob
+const screenshot = await fetch('http://localhost:4000/api/screenshot')
+  .then(r => r.blob());
+```
+
+### Python (requests)
+
+```python
+import requests
+
+# Get position
+pos = requests.get('http://localhost:4000/api/position').json()
+print(f"Mouse at ({pos['x']}, {pos['y']})")
+
+# Move mouse
+requests.post('http://localhost:4000/api/move', json={'x': 500, 'y': 300})
+
+# Save screenshot
+response = requests.get('http://localhost:4000/api/screenshot')
+with open('screenshot.bmp', 'wb') as f:
+    f.write(response.content)
+```
+
+### cURL
+
+```bash
+# Get position
+curl http://localhost:4000/api/position
+
+# Move mouse
+curl -X POST http://localhost:4000/api/move -d '{"x":500,"y":300}'
+
+# Click with right button
+curl -X POST http://localhost:4000/api/click -d '{"x":100,"y":100,"button":"right"}'
+
+# Record, save, and replay
+curl -X POST http://localhost:4000/api/recording/start
+# ... perform actions ...
+curl -X POST http://localhost:4000/api/recording/stop
+curl -X POST http://localhost:4000/api/recording/save -d '{"filename":"macro.json"}'
+curl -X POST http://localhost:4000/api/recording/play
+```

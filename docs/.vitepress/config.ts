@@ -2,9 +2,9 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   title: 'ZMouse',
-  description: 'A Windows mouse and keyboard controller with recording and HTTP API',
+  description: 'A Windows input controller and automation library written in Zig',
   lang: 'en-US',
-  
+
   base: '/zmouse/',
 
   head: [
@@ -17,8 +17,8 @@ export default defineConfig({
     nav: [
       { text: 'Home', link: '/' },
       { text: 'Guide', link: '/guide/getting-started' },
-      { text: 'API', link: '/guide/api' },
-      { text: 'Commands', link: '/guide/commands' }
+      { text: 'Library', link: '/guide/library' },
+      { text: 'HTTP API', link: '/guide/api' }
     ],
 
     sidebar: {
@@ -37,6 +37,12 @@ export default defineConfig({
             { text: 'Recording & Playback', link: '/guide/recording' },
             { text: 'HTTP API', link: '/guide/api' },
             { text: 'Screenshots', link: '/guide/screenshots' }
+          ]
+        },
+        {
+          text: 'Library',
+          items: [
+            { text: 'Library Usage', link: '/guide/library' }
           ]
         },
         {

@@ -4,133 +4,257 @@ Guidelines for AI coding agents working on this project.
 
 ## Project Overview
 
-**zmouse** is a Windows command-line input controller written in Zig. It reads text commands from stdin and executes mouse/keyboard actions using Win32 API via Zig's C interop. Includes recording and playback of input events.
+**ZMouse** is a Windows input controller and automation library written in Zig. It provides:
+- CLI for mouse/keyboard control
+- Input event recording and playback
+- HTTP REST API for remote control
+- Library API for Zig projects
 
 ## Zig Version
 
-This project uses **Zig 0.16.0-dev** which has significant breaking changes from 0.13/0.14/0.15:
+This project uses **Zig 0.16.0-dev** with these API patterns:
 
-- `std.io` is replaced by `std.Io`
-- `main()` takes `std.process.Init` parameter for I/O access
-- `callconv(.winapi)` instead of `WINAPI` constant
-- `c_int` is now a primitive type (don't redeclare it)
-- Build API uses `root_module` with `b.createModule()` instead of `root_source_file`
-- `ArrayList` methods require allocator parameter: `list.append(alloc, item)`
-- Use `ArrayListUnmanaged` for global state
+```zig
+// Main function signature
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const alloc = init.gpa;
+}
+
+// Build API
+const exe = b.addExecutable(.{
+    .name = "zmouse",
+    .root_module = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    }),
+});
+
+// Stdin reading
+const stdin_file = std.Io.File.stdin();
+var reader = std.Io.File.Reader.init(stdin_file, io, &read_buf);
+
+// Args parsing
+var arg_iter = try std.process.Args.Iterator.initAllocator(init.minimal.args, alloc);
+```
 
 ## Project Structure
 
 ```
 zmouse/
-├── build.zig           # Zig build configuration
+├── build.zig           # Build configuration (test, run steps)
 ├── src/
-│   ├── main.zig        # Entry point and REPL loop
-│   ├── win32.zig       # Win32 API bindings
+│   ├── root.zig        # PUBLIC API - Library entry point
+│   ├── main.zig        # CLI entry point
+│   ├── errors.zig      # Domain error types (InputError, RecorderError, etc.)
+│   ├── mouse.zig       # Input operations (ScreenDimensions, MousePosition)
+│   ├── recorder.zig    # Recorder struct with encapsulated state
+│   ├── http_server.zig # Server struct with encapsulated state
+│   ├── screenshot.zig  # Screenshot struct and capture
+│   ├── json_io.zig     # JSON file I/O
+│   ├── commands.zig    # CLI command parsing
 │   ├── coordinates.zig # Pixel to absolute coordinate conversion
-│   ├── mouse.zig       # Mouse and keyboard operations
-│   ├── commands.zig    # Command parsing and dispatch
-│   ├── recorder.zig    # Input event recording with hooks
-│   └── json_io.zig     # JSON serialization for events
-├── PRD.md              # Product requirements document
-├── README.md           # User documentation
+│   └── win32.zig       # Win32 API bindings
+├── docs/               # VitePress documentation
+├── README.md
 └── AGENTS.md           # This file
 ```
 
-## Module Responsibilities
+## Architecture (Post-Refactor)
+
+### State Encapsulation
+
+All state is encapsulated in structs (no global state):
+
+```zig
+// Recorder
+var rec = recorder.Recorder.init(allocator);
+defer rec.deinit();
+try rec.startRecording();
+rec.stopRecording();
+
+// HTTP Server
+var server = http_server.Server.init(allocator, screen.width, screen.height, &rec);
+defer server.deinit();
+try server.start(4000);
+```
+
+### Error Handling
+
+Domain-specific error types in `errors.zig`:
+
+```zig
+pub const InputError = error{ SendInputFailed, InvalidCoordinates, ... };
+pub const RecorderError = error{ NotInitialized, AlreadyRecording, ... };
+pub const ServerError = error{ WSAStartupFailed, BindFailed, ... };
+pub const StorageError = error{ FileNotFound, InvalidJson, ... };
+```
+
+Functions return errors instead of silent failure:
+
+```zig
+// Returns error on failure
+pub fn moveMouse(x: i32, y: i32, screen: ScreenDimensions) InputError!void
+```
+
+### Module Responsibilities
 
 | Module | Purpose |
 |--------|---------|
-| `main.zig` | REPL loop, stdin reading, recorder init, screen metrics |
-| `win32.zig` | Win32 constants, structs (`INPUT`, `MOUSEINPUT`, `KEYBDINPUT`, hook structs), extern fn declarations |
-| `coordinates.zig` | `toAbsoluteX/Y()` - convert pixels to 0-65535 range |
-| `mouse.zig` | `moveMouse()`, `leftClick()`, `rightClick()`, `scrollWheel()`, `sendKey()` |
-| `commands.zig` | `runCommand()` - parse and dispatch all commands including recording |
-| `recorder.zig` | `startRecording()`, `stopRecording()`, hook callbacks, threaded message pump |
-| `json_io.zig` | `saveEvents()`, `loadEvents()` - JSON file I/O |
+| `root.zig` | Public API exports, type re-exports |
+| `main.zig` | CLI REPL loop, args parsing |
+| `errors.zig` | All domain error types |
+| `mouse.zig` | `moveMouse()`, `leftClick()`, `sendKey()`, `ScreenDimensions` |
+| `recorder.zig` | `Recorder` struct, `Event`, `EventType`, hook thread |
+| `http_server.zig` | `Server` struct, route handlers, JSON helpers |
+| `screenshot.zig` | `Screenshot` struct, `captureScreen()`, BMP encoding |
+| `json_io.zig` | `saveEvents()`, `loadEvents()` |
+| `commands.zig` | `runCommand()` dispatcher |
+| `coordinates.zig` | `toAbsoluteX/Y()` conversion |
+| `win32.zig` | Win32 constants, structs, extern functions |
 
 ## Build Commands
 
 ```powershell
-zig build              # Build to zig-out\bin\mouse_controller.exe
-zig build run          # Build and run
+zig build                       # Build to zig-out\bin\zmouse.exe
+zig build run                   # Build and run CLI
+zig build run -- --http         # Run with HTTP server
+zig build run -- --http 8080    # Custom port
+zig build test                  # Run all tests
 zig build -Doptimize=ReleaseSafe  # Optimized build
 ```
 
 ## Code Conventions
 
-- Use `std.debug.print` for console output (not the old `std.io.getStdOut()`)
-- Use `extern struct` for Win32 structures (C ABI compatibility)
-- Keep Win32 bindings isolated in `win32.zig`
-- Error handling: return `error.InvalidCommand` for parse failures
-- All coordinate commands follow pattern: `<letter><X>-<Y>`
-- Use `ArrayListUnmanaged` for global state, pass allocator to methods
+### Naming
+- Structs: PascalCase (`Recorder`, `Server`, `ScreenDimensions`)
+- Functions: camelCase (`moveMouse`, `startRecording`)
+- Constants: SCREAMING_SNAKE_CASE (`MOUSEEVENTF_LEFTDOWN`)
+- Local variables: snake_case (`screen_width`, `prev_time`)
 
-## Command Syntax
+### Patterns
+- Use `defer` for cleanup: `defer rec.deinit()`
+- Use `errdefer` for error cleanup paths
+- Pass allocator explicitly, don't store globally
+- Return errors instead of panicking
+- Use `std.mem.zeroes()` instead of `undefined` for Win32 structs
 
-| Command | Action |
-|---------|--------|
-| `m<X>-<Y>` | Move mouse to (X, Y) |
-| `c<X>-<Y>` | Move and left-click |
-| `r<X>-<Y>` | Move and right-click |
-| `d<X>-<Y>` | Move and double-click |
-| `sc<N>` | Scroll up by N units |
-| `sd<N>` | Scroll down by N units |
-| `g` | Get mouse position |
-| `q` | Quit |
-| `rec` | Start recording |
-| `stop` | Stop recording |
-| `save <file>` | Save events to JSON |
-| `load <file>` | Load events from JSON |
-| `play` | Replay events |
+### Win32 Interop
+- All Win32 types in `win32.zig`
+- Use `extern struct` for C ABI compatibility
+- Use `callconv(.winapi)` for Windows calling convention
+- Use `@ptrFromInt` for pointer conversion in hook callbacks
 
-## Recording Architecture
+## Key Types
 
-The recording system uses Win32 low-level hooks:
-
-1. **Hook Thread**: `recorder.zig` spawns a thread that:
-   - Installs `WH_MOUSE_LL` and `WH_KEYBOARD_LL` hooks
-   - Runs a message pump (`PeekMessageW` loop)
-   - Hook callbacks append events to global `ArrayListUnmanaged`
-
-2. **Event Types** (`EventType` enum):
-   - Mouse: `move`, `left_down`, `left_up`, `right_down`, `right_up`, `wheel`
-   - Keyboard: `key_down`, `key_up`
-
-3. **Event Struct** (`MouseEvent`):
-   - `timestamp_ms`: Time since recording started
-   - `event_type`: Type of input event
-   - `x`, `y`: Mouse coordinates (0 for keyboard)
-   - `data`: Wheel delta or virtual key code
-
-4. **Playback**: Iterates events, sleeps for timing, calls `mouse.moveMouse()`, `mouse.sendKey()`, etc.
-
-## Win32 Hooks
-
+### ScreenDimensions
 ```zig
-// Hook installation (in separate thread)
-mouse_hook = SetWindowsHookExW(WH_MOUSE_LL, mouseHookProc, null, 0);
-keyboard_hook = SetWindowsHookExW(WH_KEYBOARD_LL, keyboardHookProc, null, 0);
+pub const ScreenDimensions = struct {
+    width: c_int,
+    height: c_int,
+    pub fn isValid(self: ScreenDimensions) bool { ... }
+};
+```
 
-// Hook callback signature
-fn hookProc(nCode: c_int, wParam: usize, lParam: isize) callconv(.winapi) isize
+### Event
+```zig
+pub const Event = struct {
+    timestamp_ms: i64,
+    event_type: EventType,
+    x: i32,
+    y: i32,
+    data: i32,  // wheel delta or virtual key code
+};
+```
+
+### EventType
+```zig
+pub const EventType = enum {
+    move, left_down, left_up, right_down, right_up, wheel,
+    key_down, key_up,
+    
+    pub fn toString(self: EventType) []const u8 { return @tagName(self); }
+    pub fn fromString(s: []const u8) ?EventType { return std.meta.stringToEnum(EventType, s); }
+};
 ```
 
 ## Testing
 
-Manual testing:
+```powershell
+# Run all tests
+zig build test
 
-1. Run `zig build run`
-2. Test basic commands: `m500-300`, `c100-100`, `g`, `sc5`
-3. Test recording:
-   - `rec` → move mouse, click, type → `stop`
-   - `save test.json` → verify JSON file
-   - `load test.json` → `play` → verify replay
-4. Enter `q` to quit
+# Manual CLI testing
+zig build run
+> m500-300     # Move mouse
+> c100-100     # Click
+> g            # Get position
+> rec          # Start recording
+> stop         # Stop recording
+> save test.json
+> load test.json
+> play
+> q
+
+# HTTP API testing
+zig build run -- --http
+curl http://localhost:4000/api/position
+curl -X POST http://localhost:4000/api/move -d '{"x":500,"y":300}'
+```
+
+## Recording Architecture
+
+```
+┌─────────────────┐
+│   Main Thread   │
+│   (REPL/HTTP)   │
+└────────┬────────┘
+         │ startRecording()
+         ▼
+┌─────────────────┐
+│  Hook Thread    │
+│  (message pump) │
+│                 │
+│ WH_MOUSE_LL     │◄── System mouse events
+│ WH_KEYBOARD_LL  │◄── System keyboard events
+└────────┬────────┘
+         │ appendEvent()
+         ▼
+┌─────────────────┐
+│ Recorder.events │
+│ (ArrayListUnmanaged)
+└─────────────────┘
+```
+
+## HTTP Server Architecture
+
+```
+Client Request
+      │
+      ▼
+┌─────────────┐
+│ Server.poll │ (non-blocking accept)
+└──────┬──────┘
+       │
+       ▼
+┌─────────────────┐
+│ handleRequest   │
+│ routeRequest    │
+└────────┬────────┘
+         │
+    ┌────┴────┐
+    ▼         ▼
+┌───────┐ ┌────────────┐
+│ mouse │ │ recorder   │
+│ input │ │ screenshot │
+└───────┘ └────────────┘
+```
 
 ## Platform Notes
 
-- **Windows only** - uses `user32.dll` and `kernel32.dll` via Zig's C interop
-- Coordinates normalized to 0-65535 range for `MOUSEEVENTF_ABSOLUTE`
-- `SendInput` used for mouse/keyboard simulation
+- **Windows only** - Uses `user32.dll`, `gdi32.dll`, `ws2_32.dll`, `kernel32.dll`
+- Mouse coordinates normalized to 0-65535 for `MOUSEEVENTF_ABSOLUTE`
 - Low-level hooks require message pump in same thread
-- JSON I/O uses direct Win32 `CreateFileA`/`ReadFile`/`WriteFile` (not std.fs)
+- HTTP server uses Winsock with non-blocking sockets
+- Screenshot uses GDI (`GetDC`, `BitBlt`, `GetDIBits`)
