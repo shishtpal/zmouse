@@ -48,7 +48,7 @@ extern "kernel32" fn CloseHandle(hObject: HANDLE) callconv(.winapi) c_int;
 extern "kernel32" fn GetFileSize(hFile: HANDLE, lpFileSizeHigh: ?*u32) callconv(.winapi) u32;
 
 /// Save events to a JSON file
-pub fn saveEvents(events: []const recorder.MouseEvent, filepath: []const u8, alloc: std.mem.Allocator) !void {
+pub fn saveEvents(events: []const recorder.Event, filepath: []const u8, alloc: std.mem.Allocator) !void {
     var json_buf = std.ArrayListUnmanaged(u8).empty;
     defer json_buf.deinit(alloc);
 
@@ -112,7 +112,7 @@ fn appendInt(buf: *std.ArrayListUnmanaged(u8), alloc: std.mem.Allocator, val: i6
 }
 
 /// Load events from a JSON file
-pub fn loadEvents(filepath: []const u8, alloc: std.mem.Allocator) ![]recorder.MouseEvent {
+pub fn loadEvents(filepath: []const u8, alloc: std.mem.Allocator) ![]recorder.Event {
     // Create null-terminated filepath
     var path_buf: [260]u8 = undefined;
     if (filepath.len >= path_buf.len) return error.PathTooLong;
@@ -149,8 +149,8 @@ pub fn loadEvents(filepath: []const u8, alloc: std.mem.Allocator) ![]recorder.Mo
 }
 
 /// Parse JSON content into events
-fn parseJson(content: []const u8, alloc: std.mem.Allocator) ![]recorder.MouseEvent {
-    var events = std.ArrayListUnmanaged(recorder.MouseEvent).empty;
+fn parseJson(content: []const u8, alloc: std.mem.Allocator) ![]recorder.Event {
+    var events = std.ArrayListUnmanaged(recorder.Event).empty;
     errdefer events.deinit(alloc);
 
     // Find "events": [ and parse each object
@@ -185,8 +185,8 @@ fn parseJson(content: []const u8, alloc: std.mem.Allocator) ![]recorder.MouseEve
 }
 
 /// Parse a single event object
-fn parseEventObject(obj: []const u8) !recorder.MouseEvent {
-    var event: recorder.MouseEvent = .{
+fn parseEventObject(obj: []const u8) !recorder.Event {
+    var event: recorder.Event = .{
         .timestamp_ms = 0,
         .event_type = .move,
         .x = 0,

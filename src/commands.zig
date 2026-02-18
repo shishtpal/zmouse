@@ -1,117 +1,127 @@
 //! Command parsing and dispatch
-//! Parses user input strings and executes corresponding mouse actions
+//! Parses user input strings and executes corresponding input actions
+//!
+//! Commands:
+//!   m<X>-<Y>   - Move mouse to coordinates
+//!   c<X>-<Y>   - Move and left-click
+//!   r<X>-<Y>   - Move and right-click
+//!   d<X>-<Y>   - Move and double-click
+//!   sc<N>      - Scroll up N units
+//!   sd<N>      - Scroll down N units
+//!   g          - Get mouse position
+//!   rec        - Start recording
+//!   stop       - Stop recording
+//!   save <f>   - Save events to file
+//!   load <f>   - Load events from file
+//!   play       - Replay events
 
 const std = @import("std");
-const mouse = @import("mouse.zig");
+const input = @import("mouse.zig");
 const recorder = @import("recorder.zig");
 const json_io = @import("json_io.zig");
 const win32 = @import("win32.zig");
+const errors = @import("errors.zig");
 
-pub const CommandError = error{InvalidCommand};
+pub const CommandError = errors.CommandError;
 
-/// Parsed coordinate command
+// ═══════════════════════════════════════════════════════════════════════
+//  Coordinate Parsing
+// ═══════════════════════════════════════════════════════════════════════
+
 const CoordinatePair = struct {
     x: i32,
     y: i32,
 };
 
-/// Parse the "X-Y" portion of a coordinate command (e.g. "120-150").
 fn parseXY(s: []const u8) CommandError!CoordinatePair {
     const sep = std.mem.indexOfScalar(u8, s, '-') orelse
-        return error.InvalidCommand;
+        return error.InvalidFormat;
     if (sep == 0 or sep >= s.len - 1)
-        return error.InvalidCommand;
+        return error.InvalidFormat;
     return .{
         .x = std.fmt.parseInt(i32, s[0..sep], 10) catch
-            return error.InvalidCommand,
+            return error.InvalidNumber,
         .y = std.fmt.parseInt(i32, s[sep + 1 ..], 10) catch
-            return error.InvalidCommand,
+            return error.InvalidNumber,
     };
 }
 
-/// Execute a mouse movement command (m<X>-<Y>)
-fn executeMove(args: []const u8, sw: c_int, sh: c_int) !void {
+// ═══════════════════════════════════════════════════════════════════════
+//  Command Handlers
+// ═══════════════════════════════════════════════════════════════════════
+
+fn executeMove(args: []const u8, screen: input.ScreenDimensions) !void {
     const pt = try parseXY(args);
-    mouse.moveMouse(pt.x, pt.y, sw, sh);
+    input.moveMouse(pt.x, pt.y, screen) catch return error.InvalidCoordinates;
     std.debug.print("  Mouse moved to ({d}, {d})\n\n", .{ pt.x, pt.y });
 }
 
-/// Execute a click command (c<X>-<Y>)
-fn executeClick(args: []const u8, sw: c_int, sh: c_int) !void {
+fn executeClick(args: []const u8, screen: input.ScreenDimensions) !void {
     const pt = try parseXY(args);
-    mouse.moveMouse(pt.x, pt.y, sw, sh);
-    mouse.leftClick();
+    input.moveMouse(pt.x, pt.y, screen) catch return error.InvalidCoordinates;
+    input.leftClick();
     std.debug.print("  Mouse moved to ({d}, {d}) and clicked\n\n", .{ pt.x, pt.y });
 }
 
-/// Execute a right-click command (r<X>-<Y>)
-fn executeRightClick(args: []const u8, sw: c_int, sh: c_int) !void {
+fn executeRightClick(args: []const u8, screen: input.ScreenDimensions) !void {
     const pt = try parseXY(args);
-    mouse.moveMouse(pt.x, pt.y, sw, sh);
-    mouse.rightClick();
+    input.moveMouse(pt.x, pt.y, screen) catch return error.InvalidCoordinates;
+    input.rightClick();
     std.debug.print("  Mouse moved to ({d}, {d}) and right-clicked\n\n", .{ pt.x, pt.y });
 }
 
-/// Execute a double-click command (d<X>-<Y>)
-fn executeDoubleClick(args: []const u8, sw: c_int, sh: c_int) !void {
+fn executeDoubleClick(args: []const u8, screen: input.ScreenDimensions) !void {
     const pt = try parseXY(args);
-    mouse.moveMouse(pt.x, pt.y, sw, sh);
-    mouse.doubleClick();
+    input.moveMouse(pt.x, pt.y, screen) catch return error.InvalidCoordinates;
+    input.doubleClick();
     std.debug.print("  Mouse moved to ({d}, {d}) and double-clicked\n\n", .{ pt.x, pt.y });
 }
 
-/// Execute a scroll-up command (sc<N>)
 fn executeScrollUp(args: []const u8) !void {
     const n = std.fmt.parseInt(i32, args, 10) catch
-        return error.InvalidCommand;
-    mouse.scrollWheel(n);
+        return error.InvalidNumber;
+    input.scrollUp(n);
     std.debug.print("  Scrolled up by {d}\n\n", .{n});
 }
 
-/// Execute a scroll-down command (sd<N>)
 fn executeScrollDown(args: []const u8) !void {
     const n = std.fmt.parseInt(i32, args, 10) catch
-        return error.InvalidCommand;
-    mouse.scrollWheel(-n);
+        return error.InvalidNumber;
+    input.scrollDown(n);
     std.debug.print("  Scrolled down by {d}\n\n", .{n});
 }
 
-/// Execute a get-position command (g)
 fn executeGetPosition() void {
-    if (mouse.getPosition()) |pos| {
+    if (input.getPosition()) |pos| {
         std.debug.print("  Mouse position: ({d}, {d})\n\n", .{ pos.x, pos.y });
     } else {
         std.debug.print("  Error: Could not get mouse position\n\n", .{});
     }
 }
 
-/// Execute start recording command (rec)
-fn executeStartRecording() void {
-    if (recorder.isRecording()) {
+fn executeStartRecording(rec: *recorder.Recorder) void {
+    if (rec.isRecording()) {
         std.debug.print("  Already recording. Use 'stop' first.\n\n", .{});
         return;
     }
-    if (recorder.startRecording()) {
-        std.debug.print("  Recording started. Use 'stop' to finish.\n\n", .{});
-    } else {
+    rec.startRecording() catch {
         std.debug.print("  Error: Could not start recording.\n\n", .{});
-    }
+        return;
+    };
+    std.debug.print("  Recording started. Use 'stop' to finish.\n\n", .{});
 }
 
-/// Execute stop recording command (stop)
-fn executeStopRecording() void {
-    if (!recorder.isRecording()) {
+fn executeStopRecording(rec: *recorder.Recorder) void {
+    if (!rec.isRecording()) {
         std.debug.print("  Not currently recording.\n\n", .{});
         return;
     }
-    recorder.stopRecording();
-    const count = recorder.getEventCount();
-    std.debug.print("  Recording stopped. {d} events captured.\n\n", .{count});
+    rec.stopRecording();
+    std.debug.print("  Recording stopped. {d} events captured.\n\n", .{rec.getEventCount()});
 }
 
-/// Execute save command (save <filename>)
-fn executeSave(filename: []const u8, alloc: std.mem.Allocator) void {
-    const events = recorder.getEvents();
+fn executeSave(filename: []const u8, alloc: std.mem.Allocator, rec: *recorder.Recorder) void {
+    const events = rec.getEvents();
     if (events.len == 0) {
         std.debug.print("  No events to save.\n\n", .{});
         return;
@@ -123,24 +133,22 @@ fn executeSave(filename: []const u8, alloc: std.mem.Allocator) void {
     std.debug.print("  Saved {d} events to '{s}'\n\n", .{ events.len, filename });
 }
 
-/// Execute load command (load <filename>)
-fn executeLoad(filename: []const u8, alloc: std.mem.Allocator) void {
+fn executeLoad(filename: []const u8, alloc: std.mem.Allocator, rec: *recorder.Recorder) void {
     const events = json_io.loadEvents(filename, alloc) catch |err| {
         std.debug.print("  Error loading: {}\n\n", .{err});
         return;
     };
-    recorder.setEvents(events) catch |err| {
-        alloc.free(events);
-        std.debug.print("  Error setting events: {}\n\n", .{err});
+    defer alloc.free(events);
+
+    rec.setEvents(events) catch {
+        std.debug.print("  Error setting events.\n\n", .{});
         return;
     };
-    alloc.free(events);
-    std.debug.print("  Loaded {d} events from '{s}'\n\n", .{ recorder.getEventCount(), filename });
+    std.debug.print("  Loaded {d} events from '{s}'\n\n", .{ rec.getEventCount(), filename });
 }
 
-/// Execute play command (play)
-fn executePlay(sw: c_int, sh: c_int) void {
-    const events = recorder.getEvents();
+fn executePlay(screen: input.ScreenDimensions, rec: *recorder.Recorder) void {
+    const events = rec.getEvents();
     if (events.len == 0) {
         std.debug.print("  No events to play. Record or load first.\n\n", .{});
         return;
@@ -150,34 +158,33 @@ fn executePlay(sw: c_int, sh: c_int) void {
 
     var prev_time: i64 = 0;
     for (events) |event| {
-        // Wait for the appropriate delay
         if (event.timestamp_ms > prev_time) {
             const delay: u32 = @intCast(event.timestamp_ms - prev_time);
             win32.Sleep(delay);
         }
         prev_time = event.timestamp_ms;
 
-        // Execute the event
         switch (event.event_type) {
-            // Mouse events
-            .move => mouse.moveMouse(event.x, event.y, sw, sh),
-            .left_down => mouse.clickButton(win32.MOUSEEVENTF_LEFTDOWN, 0),
-            .left_up => mouse.clickButton(0, win32.MOUSEEVENTF_LEFTUP),
-            .right_down => mouse.clickButton(win32.MOUSEEVENTF_RIGHTDOWN, 0),
-            .right_up => mouse.clickButton(0, win32.MOUSEEVENTF_RIGHTUP),
+            .move => input.moveMouse(event.x, event.y, screen) catch {},
+            .left_down => input.sendMouseEvent(win32.MOUSEEVENTF_LEFTDOWN),
+            .left_up => input.sendMouseEvent(win32.MOUSEEVENTF_LEFTUP),
+            .right_down => input.sendMouseEvent(win32.MOUSEEVENTF_RIGHTDOWN),
+            .right_up => input.sendMouseEvent(win32.MOUSEEVENTF_RIGHTUP),
             .wheel => {
-                // Scroll amount is in data field (already multiplied by WHEEL_DELTA in original)
                 const scroll_amount = @divTrunc(event.data, win32.WHEEL_DELTA);
-                mouse.scrollWheel(scroll_amount);
+                input.scrollWheel(scroll_amount);
             },
-            // Keyboard events
-            .key_down => mouse.sendKey(@intCast(event.data), false),
-            .key_up => mouse.sendKey(@intCast(event.data), true),
+            .key_down => input.sendKey(@intCast(event.data), false),
+            .key_up => input.sendKey(@intCast(event.data), true),
         }
     }
 
     std.debug.print("  Playback complete.\n\n", .{});
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Command Dispatcher
+// ═══════════════════════════════════════════════════════════════════════
 
 /// Parse and dispatch a single trimmed command string
 pub fn runCommand(
@@ -185,8 +192,11 @@ pub fn runCommand(
     sw: c_int,
     sh: c_int,
     alloc: std.mem.Allocator,
+    rec: *recorder.Recorder,
 ) !void {
     if (cmd.len == 0) return;
+
+    const screen = input.ScreenDimensions{ .width = sw, .height = sh };
 
     // Single-char commands
     if (std.mem.eql(u8, cmd, "g")) {
@@ -196,15 +206,15 @@ pub fn runCommand(
 
     // Recording commands
     if (std.mem.eql(u8, cmd, "rec")) {
-        executeStartRecording();
+        executeStartRecording(rec);
         return;
     }
     if (std.mem.eql(u8, cmd, "stop")) {
-        executeStopRecording();
+        executeStopRecording(rec);
         return;
     }
     if (std.mem.eql(u8, cmd, "play")) {
-        executePlay(sw, sh);
+        executePlay(screen, rec);
         return;
     }
 
@@ -212,19 +222,19 @@ pub fn runCommand(
     if (cmd.len >= 5 and std.mem.eql(u8, cmd[0..5], "save ")) {
         const filename = std.mem.trim(u8, cmd[5..], " \t");
         if (filename.len > 0) {
-            executeSave(filename, alloc);
+            executeSave(filename, alloc, rec);
             return;
         }
     }
     if (cmd.len >= 5 and std.mem.eql(u8, cmd[0..5], "load ")) {
         const filename = std.mem.trim(u8, cmd[5..], " \t");
         if (filename.len > 0) {
-            executeLoad(filename, alloc);
+            executeLoad(filename, alloc, rec);
             return;
         }
     }
 
-    // Scroll commands (require at least 3 chars: "sc" or "sd" + digits)
+    // Scroll commands
     if (cmd.len >= 3) {
         if (std.mem.eql(u8, cmd[0..2], "sc")) {
             return executeScrollUp(cmd[2..]);
@@ -234,15 +244,15 @@ pub fn runCommand(
         }
     }
 
-    // Coordinate commands require at least 4 chars: letter + "X-Y"
-    if (cmd.len < 4) return error.InvalidCommand;
+    // Coordinate commands
+    if (cmd.len < 4) return error.UnknownCommand;
 
     switch (cmd[0]) {
-        'm' => try executeMove(cmd[1..], sw, sh),
-        'c' => try executeClick(cmd[1..], sw, sh),
-        'r' => try executeRightClick(cmd[1..], sw, sh),
-        'd' => try executeDoubleClick(cmd[1..], sw, sh),
-        else => return error.InvalidCommand,
+        'm' => try executeMove(cmd[1..], screen),
+        'c' => try executeClick(cmd[1..], screen),
+        'r' => try executeRightClick(cmd[1..], screen),
+        'd' => try executeDoubleClick(cmd[1..], screen),
+        else => return error.UnknownCommand,
     }
 }
 
@@ -250,7 +260,7 @@ pub fn runCommand(
 pub fn printHelp(sw: c_int, sh: c_int) void {
     std.debug.print(
         \\
-        \\  Mouse Controller  (screen {d} x {d})
+        \\  ZMouse  (screen {d} x {d})
         \\  ─────────────────────────────────────
         \\  m<X>-<Y>   move            c<X>-<Y>   move + left-click
         \\  r<X>-<Y>   move + right    d<X>-<Y>   move + double-click
@@ -258,7 +268,7 @@ pub fn printHelp(sw: c_int, sh: c_int) void {
         \\  g          get position    q          quit
         \\
         \\  Recording:
-        \\  rec           start recording mouse events
+        \\  rec           start recording input events
         \\  stop          stop recording
         \\  save <file>   save events to JSON file
         \\  load <file>   load events from JSON file

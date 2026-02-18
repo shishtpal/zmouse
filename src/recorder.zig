@@ -1,8 +1,25 @@
-//! Mouse event recording and playback
-//! Captures system-level mouse events using Win32 low-level hooks
+//! Input event recording and playback
+//! Captures system-level input events using Win32 low-level hooks
+//!
+//! Example usage:
+//! ```zig
+//! var recorder = Recorder.init(allocator);
+//! defer recorder.deinit();
+//!
+//! try recorder.startRecording();
+//! // ... user performs actions ...
+//! recorder.stopRecording();
+//!
+//! const events = recorder.getEvents();
+//! ```
 
 const std = @import("std");
 const win32 = @import("win32.zig");
+const errors = @import("errors.zig");
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Event Types
+// ═══════════════════════════════════════════════════════════════════════
 
 /// Types of input events that can be recorded
 pub const EventType = enum {
@@ -17,73 +34,162 @@ pub const EventType = enum {
     key_down,
     key_up,
 
+    /// Convert event type to string for JSON serialization
     pub fn toString(self: EventType) []const u8 {
-        return switch (self) {
-            .move => "move",
-            .left_down => "left_down",
-            .left_up => "left_up",
-            .right_down => "right_down",
-            .right_up => "right_up",
-            .wheel => "wheel",
-            .key_down => "key_down",
-            .key_up => "key_up",
+        return @tagName(self);
+    }
+
+    /// Parse event type from string (for JSON deserialization)
+    pub fn fromString(s: []const u8) ?EventType {
+        return std.meta.stringToEnum(EventType, s);
+    }
+};
+
+/// A single recorded input event
+pub const Event = struct {
+    /// Milliseconds since recording started
+    timestamp_ms: i64,
+    /// Type of input event
+    event_type: EventType,
+    /// X coordinate (mouse) or 0 (keyboard)
+    x: i32,
+    /// Y coordinate (mouse) or 0 (keyboard)
+    y: i32,
+    /// Wheel delta (scroll) or virtual key code (keyboard)
+    data: i32,
+};
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Recorder State
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Thread-local pointer to active recorder for hook callbacks
+var active_recorder: ?*Recorder = null;
+
+/// Input event recorder with encapsulated state
+pub const Recorder = struct {
+    events: std.ArrayListUnmanaged(Event),
+    allocator: std.mem.Allocator,
+    recording: bool,
+    start_time: u64,
+    mouse_hook: ?win32.HHOOK,
+    keyboard_hook: ?win32.HHOOK,
+    hook_thread: ?win32.HANDLE,
+    stop_thread: bool,
+
+    /// Initialize a new recorder with the given allocator
+    pub fn init(allocator: std.mem.Allocator) Recorder {
+        return .{
+            .events = .empty,
+            .allocator = allocator,
+            .recording = false,
+            .start_time = 0,
+            .mouse_hook = null,
+            .keyboard_hook = null,
+            .hook_thread = null,
+            .stop_thread = false,
         };
     }
 
-    pub fn fromString(s: []const u8) ?EventType {
-        if (std.mem.eql(u8, s, "move")) return .move;
-        if (std.mem.eql(u8, s, "left_down")) return .left_down;
-        if (std.mem.eql(u8, s, "left_up")) return .left_up;
-        if (std.mem.eql(u8, s, "right_down")) return .right_down;
-        if (std.mem.eql(u8, s, "right_up")) return .right_up;
-        if (std.mem.eql(u8, s, "wheel")) return .wheel;
-        if (std.mem.eql(u8, s, "key_down")) return .key_down;
-        if (std.mem.eql(u8, s, "key_up")) return .key_up;
-        return null;
+    /// Free all resources
+    pub fn deinit(self: *Recorder) void {
+        self.stopRecording();
+        self.events.deinit(self.allocator);
+    }
+
+    /// Start recording input events
+    /// Returns error if already recording or hook installation fails
+    pub fn startRecording(self: *Recorder) errors.RecorderError!void {
+        if (self.recording) return error.AlreadyRecording;
+
+        self.events.clearRetainingCapacity();
+        self.start_time = win32.GetTickCount64();
+        self.stop_thread = false;
+
+        // Set active recorder for hook callbacks
+        active_recorder = self;
+        self.recording = true;
+
+        // Start hook thread
+        self.hook_thread = win32.CreateThread(
+            null,
+            0,
+            hookThreadProc,
+            null,
+            0,
+            null,
+        );
+
+        if (self.hook_thread == null) {
+            self.recording = false;
+            active_recorder = null;
+            return error.ThreadCreationFailed;
+        }
+
+        // Give the thread a moment to set up the hooks
+        win32.Sleep(50);
+    }
+
+    /// Stop recording input events
+    pub fn stopRecording(self: *Recorder) void {
+        if (!self.recording) return;
+
+        self.recording = false;
+        self.stop_thread = true;
+
+        // Wait for hook thread to finish
+        if (self.hook_thread) |thread| {
+            _ = win32.WaitForSingleObject(thread, 1000);
+            self.hook_thread = null;
+        }
+
+        active_recorder = null;
+    }
+
+    /// Check if currently recording
+    pub fn isRecording(self: *const Recorder) bool {
+        return self.recording;
+    }
+
+    /// Get all recorded events
+    pub fn getEvents(self: *const Recorder) []const Event {
+        return self.events.items;
+    }
+
+    /// Get the number of recorded events
+    pub fn getEventCount(self: *const Recorder) usize {
+        return self.events.items.len;
+    }
+
+    /// Clear all recorded events
+    pub fn clearEvents(self: *Recorder) void {
+        self.events.clearRetainingCapacity();
+    }
+
+    /// Load events from a slice (used when loading from file)
+    pub fn setEvents(self: *Recorder, new_events: []const Event) errors.RecorderError!void {
+        self.events.clearRetainingCapacity();
+        try self.events.appendSlice(self.allocator, new_events);
+    }
+
+    /// Append an event (called from hook callbacks)
+    fn appendEvent(self: *Recorder, event: Event) void {
+        self.events.append(self.allocator, event) catch {};
     }
 };
 
-/// A single recorded mouse event
-pub const MouseEvent = struct {
-    timestamp_ms: i64, // Milliseconds since recording started
-    event_type: EventType,
-    x: i32,
-    y: i32,
-    data: i32, // For scroll amount (wheel delta)
-};
-
-/// Global recording state
-var events: std.ArrayListUnmanaged(MouseEvent) = .empty;
-var allocator: std.mem.Allocator = undefined;
-var initialized: bool = false;
-var recording: bool = false;
-var start_time: u64 = 0;
-var mouse_hook: ?win32.HHOOK = null;
-var keyboard_hook: ?win32.HHOOK = null;
-var hook_thread: ?win32.HANDLE = null;
-var stop_thread: bool = false;
-
-/// Initialize the recorder with an allocator
-pub fn init(alloc: std.mem.Allocator) void {
-    if (initialized) return;
-    allocator = alloc;
-    events = .empty;
-    initialized = true;
-}
-
-/// Deinitialize and free resources
-pub fn deinit() void {
-    if (!initialized) return;
-    stopRecording();
-    events.deinit(allocator);
-    initialized = false;
-}
+// ═══════════════════════════════════════════════════════════════════════
+//  Hook Callbacks
+// ═══════════════════════════════════════════════════════════════════════
 
 /// Low-level mouse hook callback
 fn mouseHookProc(nCode: c_int, wParam: usize, lParam: isize) callconv(.winapi) isize {
-    if (nCode >= 0 and recording) {
-        const hook_struct: *win32.MSLLHOOKSTRUCT = @ptrFromInt(@as(usize, @bitCast(lParam)));
-        const elapsed = win32.GetTickCount64() - start_time;
+    const rec = active_recorder orelse return win32.CallNextHookEx(null, nCode, wParam, lParam);
+    
+    if (nCode >= 0 and rec.recording) {
+        const hook_struct: *align(1) const win32.MSLLHOOKSTRUCT = 
+            @ptrFromInt(@as(usize, @bitCast(lParam)));
+        const elapsed = win32.GetTickCount64() - rec.start_time;
 
         const event_type: ?EventType = switch (wParam) {
             win32.WM_MOUSEMOVE => .move,
@@ -102,23 +208,26 @@ fn mouseHookProc(nCode: c_int, wParam: usize, lParam: isize) callconv(.winapi) i
             else
                 0;
 
-            events.append(allocator, .{
+            rec.appendEvent(.{
                 .timestamp_ms = @intCast(elapsed),
                 .event_type = et,
                 .x = @intCast(hook_struct.pt.x),
                 .y = @intCast(hook_struct.pt.y),
                 .data = wheel_data,
-            }) catch {};
+            });
         }
     }
-    return win32.CallNextHookEx(mouse_hook, nCode, wParam, lParam);
+    return win32.CallNextHookEx(rec.mouse_hook, nCode, wParam, lParam);
 }
 
 /// Low-level keyboard hook callback
 fn keyboardHookProc(nCode: c_int, wParam: usize, lParam: isize) callconv(.winapi) isize {
-    if (nCode >= 0 and recording) {
-        const hook_struct: *win32.KBDLLHOOKSTRUCT = @ptrFromInt(@as(usize, @bitCast(lParam)));
-        const elapsed = win32.GetTickCount64() - start_time;
+    const rec = active_recorder orelse return win32.CallNextHookEx(null, nCode, wParam, lParam);
+    
+    if (nCode >= 0 and rec.recording) {
+        const hook_struct: *align(1) const win32.KBDLLHOOKSTRUCT = 
+            @ptrFromInt(@as(usize, @bitCast(lParam)));
+        const elapsed = win32.GetTickCount64() - rec.start_time;
 
         const event_type: ?EventType = switch (wParam) {
             win32.WM_KEYDOWN, win32.WM_SYSKEYDOWN => .key_down,
@@ -127,130 +236,92 @@ fn keyboardHookProc(nCode: c_int, wParam: usize, lParam: isize) callconv(.winapi
         };
 
         if (event_type) |et| {
-            events.append(allocator, .{
+            rec.appendEvent(.{
                 .timestamp_ms = @intCast(elapsed),
                 .event_type = et,
                 .x = 0,
                 .y = 0,
                 .data = @intCast(hook_struct.vkCode),
-            }) catch {};
+            });
         }
     }
-    return win32.CallNextHookEx(keyboard_hook, nCode, wParam, lParam);
+    return win32.CallNextHookEx(rec.keyboard_hook, nCode, wParam, lParam);
 }
 
 /// Thread function that runs the message pump for the hooks
 fn hookThreadProc(_: ?*anyopaque) callconv(.winapi) u32 {
-    // Install the mouse hook
-    mouse_hook = win32.SetWindowsHookExW(win32.WH_MOUSE_LL, mouseHookProc, null, 0);
-    // Install the keyboard hook
-    keyboard_hook = win32.SetWindowsHookExW(win32.WH_KEYBOARD_LL, keyboardHookProc, null, 0);
+    const rec = active_recorder orelse return 1;
 
-    if (mouse_hook == null and keyboard_hook == null) {
+    // Install the mouse hook
+    rec.mouse_hook = win32.SetWindowsHookExW(win32.WH_MOUSE_LL, mouseHookProc, null, 0);
+    // Install the keyboard hook
+    rec.keyboard_hook = win32.SetWindowsHookExW(win32.WH_KEYBOARD_LL, keyboardHookProc, null, 0);
+
+    if (rec.mouse_hook == null and rec.keyboard_hook == null) {
         return 1;
     }
 
     // Message pump loop
-    var msg: win32.MSG = undefined;
-    while (!stop_thread) {
-        // Use GetMessage for blocking (more efficient) or PeekMessage for polling
+    var msg: win32.MSG = std.mem.zeroes(win32.MSG);
+    while (!rec.stop_thread) {
         if (win32.PeekMessageW(&msg, null, 0, 0, win32.PM_REMOVE) != 0) {
             _ = win32.TranslateMessage(&msg);
             _ = win32.DispatchMessageW(&msg);
         } else {
-            // Small sleep to avoid busy-waiting
             win32.Sleep(1);
         }
     }
 
     // Unhook when done
-    if (mouse_hook) |h| {
+    if (rec.mouse_hook) |h| {
         _ = win32.UnhookWindowsHookEx(h);
-        mouse_hook = null;
+        rec.mouse_hook = null;
     }
-    if (keyboard_hook) |h| {
+    if (rec.keyboard_hook) |h| {
         _ = win32.UnhookWindowsHookEx(h);
-        keyboard_hook = null;
+        rec.keyboard_hook = null;
     }
 
     return 0;
 }
 
-/// Start recording mouse events
-pub fn startRecording() bool {
-    if (!initialized or recording) return false;
+// ═══════════════════════════════════════════════════════════════════════
+//  Tests
+// ═══════════════════════════════════════════════════════════════════════
 
-    events.clearRetainingCapacity();
-    start_time = win32.GetTickCount64();
-    stop_thread = false;
-    recording = true;
-
-    // Start hook thread
-    hook_thread = win32.CreateThread(
-        null,
-        0,
-        hookThreadProc,
-        null,
-        0,
-        null,
-    );
-
-    if (hook_thread == null) {
-        recording = false;
-        return false;
-    }
-
-    // Give the thread a moment to set up the hook
-    win32.Sleep(50);
-
-    return true;
+test "EventType.fromString parses valid strings" {
+    try std.testing.expectEqual(EventType.move, EventType.fromString("move"));
+    try std.testing.expectEqual(EventType.left_down, EventType.fromString("left_down"));
+    try std.testing.expectEqual(EventType.key_up, EventType.fromString("key_up"));
 }
 
-/// Stop recording mouse events
-pub fn stopRecording() void {
-    if (!recording) return;
+test "EventType.fromString returns null for invalid strings" {
+    try std.testing.expectEqual(@as(?EventType, null), EventType.fromString("invalid"));
+    try std.testing.expectEqual(@as(?EventType, null), EventType.fromString(""));
+}
+
+test "EventType.toString matches tag name" {
+    try std.testing.expectEqualStrings("move", EventType.move.toString());
+    try std.testing.expectEqualStrings("key_down", EventType.key_down.toString());
+}
+
+test "Recorder init/deinit" {
+    var rec = Recorder.init(std.testing.allocator);
+    defer rec.deinit();
     
-    recording = false;
-    stop_thread = true;
-
-    // Wait for hook thread to finish
-    if (hook_thread) |thread| {
-        _ = win32.WaitForSingleObject(thread, 1000); // Wait up to 1 second
-        hook_thread = null;
-    }
+    try std.testing.expectEqual(@as(usize, 0), rec.getEventCount());
+    try std.testing.expectEqual(false, rec.isRecording());
 }
 
-/// Check if currently recording
-pub fn isRecording() bool {
-    return recording;
+test "Recorder setEvents" {
+    var rec = Recorder.init(std.testing.allocator);
+    defer rec.deinit();
+    
+    const events = [_]Event{
+        .{ .timestamp_ms = 0, .event_type = .move, .x = 100, .y = 200, .data = 0 },
+        .{ .timestamp_ms = 100, .event_type = .left_down, .x = 100, .y = 200, .data = 0 },
+    };
+    
+    try rec.setEvents(&events);
+    try std.testing.expectEqual(@as(usize, 2), rec.getEventCount());
 }
-
-/// Get the recorded events
-pub fn getEvents() []const MouseEvent {
-    if (!initialized) return &[_]MouseEvent{};
-    return events.items;
-}
-
-/// Get event count
-pub fn getEventCount() usize {
-    if (!initialized) return 0;
-    return events.items.len;
-}
-
-/// Clear all recorded events
-pub fn clearEvents() void {
-    if (!initialized) return;
-    events.clearRetainingCapacity();
-}
-
-/// Set events (used when loading from file)
-pub fn setEvents(new_events: []const MouseEvent) !void {
-    if (!initialized) return error.NotInitialized;
-    events.clearRetainingCapacity();
-    try events.appendSlice(allocator, new_events);
-}
-
-pub const RecorderError = error{
-    NotInitialized,
-    OutOfMemory,
-};
