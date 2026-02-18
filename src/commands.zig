@@ -3,6 +3,9 @@
 
 const std = @import("std");
 const mouse = @import("mouse.zig");
+const recorder = @import("recorder.zig");
+const json_io = @import("json_io.zig");
+const win32 = @import("win32.zig");
 
 pub const CommandError = error{InvalidCommand};
 
@@ -82,11 +85,102 @@ fn executeGetPosition() void {
     }
 }
 
+/// Execute start recording command (rec)
+fn executeStartRecording() void {
+    if (recorder.isRecording()) {
+        std.debug.print("  Already recording. Use 'stop' first.\n\n", .{});
+        return;
+    }
+    if (recorder.startRecording()) {
+        std.debug.print("  Recording started. Use 'stop' to finish.\n\n", .{});
+    } else {
+        std.debug.print("  Error: Could not start recording.\n\n", .{});
+    }
+}
+
+/// Execute stop recording command (stop)
+fn executeStopRecording() void {
+    if (!recorder.isRecording()) {
+        std.debug.print("  Not currently recording.\n\n", .{});
+        return;
+    }
+    recorder.stopRecording();
+    const count = recorder.getEventCount();
+    std.debug.print("  Recording stopped. {d} events captured.\n\n", .{count});
+}
+
+/// Execute save command (save <filename>)
+fn executeSave(filename: []const u8, alloc: std.mem.Allocator) void {
+    const events = recorder.getEvents();
+    if (events.len == 0) {
+        std.debug.print("  No events to save.\n\n", .{});
+        return;
+    }
+    json_io.saveEvents(events, filename, alloc) catch |err| {
+        std.debug.print("  Error saving: {}\n\n", .{err});
+        return;
+    };
+    std.debug.print("  Saved {d} events to '{s}'\n\n", .{ events.len, filename });
+}
+
+/// Execute load command (load <filename>)
+fn executeLoad(filename: []const u8, alloc: std.mem.Allocator) void {
+    const events = json_io.loadEvents(filename, alloc) catch |err| {
+        std.debug.print("  Error loading: {}\n\n", .{err});
+        return;
+    };
+    recorder.setEvents(events) catch |err| {
+        alloc.free(events);
+        std.debug.print("  Error setting events: {}\n\n", .{err});
+        return;
+    };
+    alloc.free(events);
+    std.debug.print("  Loaded {d} events from '{s}'\n\n", .{ recorder.getEventCount(), filename });
+}
+
+/// Execute play command (play)
+fn executePlay(sw: c_int, sh: c_int) void {
+    const events = recorder.getEvents();
+    if (events.len == 0) {
+        std.debug.print("  No events to play. Record or load first.\n\n", .{});
+        return;
+    }
+
+    std.debug.print("  Playing {d} events...\n", .{events.len});
+
+    var prev_time: i64 = 0;
+    for (events) |event| {
+        // Wait for the appropriate delay
+        if (event.timestamp_ms > prev_time) {
+            const delay: u32 = @intCast(event.timestamp_ms - prev_time);
+            win32.Sleep(delay);
+        }
+        prev_time = event.timestamp_ms;
+
+        // Execute the event
+        switch (event.event_type) {
+            .move => mouse.moveMouse(event.x, event.y, sw, sh),
+            .left_down => mouse.clickButton(win32.MOUSEEVENTF_LEFTDOWN, 0),
+            .left_up => mouse.clickButton(0, win32.MOUSEEVENTF_LEFTUP),
+            .right_down => mouse.clickButton(win32.MOUSEEVENTF_RIGHTDOWN, 0),
+            .right_up => mouse.clickButton(0, win32.MOUSEEVENTF_RIGHTUP),
+            .wheel => {
+                // Scroll amount is in data field (already multiplied by WHEEL_DELTA in original)
+                const scroll_amount = @divTrunc(event.data, win32.WHEEL_DELTA);
+                mouse.scrollWheel(scroll_amount);
+            },
+        }
+    }
+
+    std.debug.print("  Playback complete.\n\n", .{});
+}
+
 /// Parse and dispatch a single trimmed command string
 pub fn runCommand(
     cmd: []const u8,
     sw: c_int,
     sh: c_int,
+    alloc: std.mem.Allocator,
 ) !void {
     if (cmd.len == 0) return;
 
@@ -94,6 +188,36 @@ pub fn runCommand(
     if (std.mem.eql(u8, cmd, "g")) {
         executeGetPosition();
         return;
+    }
+
+    // Recording commands
+    if (std.mem.eql(u8, cmd, "rec")) {
+        executeStartRecording();
+        return;
+    }
+    if (std.mem.eql(u8, cmd, "stop")) {
+        executeStopRecording();
+        return;
+    }
+    if (std.mem.eql(u8, cmd, "play")) {
+        executePlay(sw, sh);
+        return;
+    }
+
+    // Commands with arguments
+    if (cmd.len >= 5 and std.mem.eql(u8, cmd[0..5], "save ")) {
+        const filename = std.mem.trim(u8, cmd[5..], " \t");
+        if (filename.len > 0) {
+            executeSave(filename, alloc);
+            return;
+        }
+    }
+    if (cmd.len >= 5 and std.mem.eql(u8, cmd[0..5], "load ")) {
+        const filename = std.mem.trim(u8, cmd[5..], " \t");
+        if (filename.len > 0) {
+            executeLoad(filename, alloc);
+            return;
+        }
     }
 
     // Scroll commands (require at least 3 chars: "sc" or "sd" + digits)
@@ -128,6 +252,13 @@ pub fn printHelp(sw: c_int, sh: c_int) void {
         \\  r<X>-<Y>   move + right    d<X>-<Y>   move + double-click
         \\  sc<N>      scroll up       sd<N>      scroll down
         \\  g          get position    q          quit
+        \\
+        \\  Recording:
+        \\  rec           start recording mouse events
+        \\  stop          stop recording
+        \\  save <file>   save events to JSON file
+        \\  load <file>   load events from JSON file
+        \\  play          replay events
         \\
         \\
     , .{ sw, sh });

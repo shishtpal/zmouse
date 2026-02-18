@@ -8,6 +8,7 @@
 const std = @import("std");
 const win32 = @import("win32.zig");
 const commands = @import("commands.zig");
+const recorder = @import("recorder.zig");
 
 /// Read a line from stdin (strips \r and \n)
 fn readLine(reader: *std.Io.File.Reader, buf: []u8) !?[]const u8 {
@@ -32,6 +33,11 @@ fn readLine(reader: *std.Io.File.Reader, buf: []u8) !?[]const u8 {
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
+    const alloc = init.gpa;
+
+    // Initialize the recorder
+    recorder.init(alloc);
+    defer recorder.deinit();
 
     // Grab primary-monitor resolution for absolute-coordinate mapping.
     const screen_width = win32.GetSystemMetrics(win32.SM_CXSCREEN);
@@ -51,6 +57,13 @@ pub fn main(init: std.process.Init) !void {
         \\  r<X>-<Y>   move + right    d<X>-<Y>   move + double-click
         \\  sc<N>      scroll up       sd<N>      scroll down
         \\  g          get position    q          quit
+        \\
+        \\  Recording:
+        \\  rec           start recording mouse events
+        \\  stop          stop recording
+        \\  save <file>   save events to JSON file
+        \\  load <file>   load events from JSON file
+        \\  play          replay events
         \\
         \\
     , .{ screen_width, screen_height });
@@ -82,7 +95,7 @@ pub fn main(init: std.process.Init) !void {
             break;
         }
 
-        commands.runCommand(cmd, screen_width, screen_height) catch {
+        commands.runCommand(cmd, screen_width, screen_height, alloc) catch {
             std.debug.print("  Error: Unknown command format\n\n", .{});
         };
     }
