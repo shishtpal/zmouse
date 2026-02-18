@@ -22,16 +22,18 @@ const VERSION_MINOR: u32 = 0;
 //  Command-Line Arguments
 // ═══════════════════════════════════════════════════════════════════════
 
-const ArgsResult = struct { http_port: ?u16 };
+const ArgsResult = struct { http_port: ?u16, show_help: bool };
 
 fn parseArgs(args: []const []const u8) ArgsResult {
-    var result: ArgsResult = .{ .http_port = null };
+    var result: ArgsResult = .{ .http_port = null, .show_help = false };
 
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
         const arg = args[i];
 
-        if (std.mem.eql(u8, arg, "--http")) {
+        if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
+            result.show_help = true;
+        } else if (std.mem.eql(u8, arg, "--http")) {
             if (i + 1 < args.len) {
                 const next = args[i + 1];
                 if (std.fmt.parseInt(u16, next, 10)) |port| {
@@ -105,6 +107,12 @@ pub fn main(init: std.process.Init) !void {
         return;
     };
 
+    // Check if help was requested
+    if (parsed.show_help) {
+        printHelp(screen.width, screen.height);
+        return;
+    }
+
     // Initialize recorder
     var rec = recorder.Recorder.init(alloc);
     defer rec.deinit();
@@ -165,7 +173,7 @@ fn printHelp(sw: c_int, sh: c_int) void {
     std.debug.print(
         \\
         \\  ZMouse v{d}.{d}  (screen {d} x {d})
-        \\  ─────────────────────────────────────
+        \\  =====================================
         \\  m<X>-<Y>   move            c<X>-<Y>   move + left-click
         \\  r<X>-<Y>   move + right    d<X>-<Y>   move + double-click
         \\  sc<N>      scroll up       sd<N>      scroll down

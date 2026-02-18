@@ -261,7 +261,7 @@ pub fn printHelp(sw: c_int, sh: c_int) void {
     std.debug.print(
         \\
         \\  ZMouse  (screen {d} x {d})
-        \\  ─────────────────────────────────────
+        \\  =====================================
         \\  m<X>-<Y>   move            c<X>-<Y>   move + left-click
         \\  r<X>-<Y>   move + right    d<X>-<Y>   move + double-click
         \\  sc<N>      scroll up       sd<N>      scroll down
