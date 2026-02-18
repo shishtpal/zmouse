@@ -323,6 +323,16 @@ pub extern "ws2_32" fn ioctlsocket(
 ) callconv(.winapi) i32;
 
 pub const FIONBIO: u32 = 0x8004667E;
+pub const SOL_SOCKET: i32 = 0xFFFF;
+pub const SO_RCVTIMEO: i32 = 0x1006;
+
+pub extern "ws2_32" fn setsockopt(
+    s: SOCKET,
+    level: i32,
+    optname: i32,
+    optval: [*]const u8,
+    optlen: i32,
+) callconv(.winapi) i32;
 
 // ═══════════════════════════════════════════════════════════════════════
 //  Win32 GDI imports (gdi32.dll and user32.dll)

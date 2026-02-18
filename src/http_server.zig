@@ -26,6 +26,9 @@ const errors = @import("errors.zig");
 //  HTTP Server
 // ═══════════════════════════════════════════════════════════════════════
 
+/// Thread-local pointer to active server for poll thread callback
+var active_server: ?*Server = null;
+
 /// HTTP server with encapsulated state
 pub const Server = struct {
     socket: win32.SOCKET,
@@ -33,6 +36,7 @@ pub const Server = struct {
     screen: mouse.ScreenDimensions,
     running: bool,
     rec: *recorder.Recorder,
+    poll_thread: ?win32.HANDLE,
 
     /// Initialize a new server
     pub fn init(allocator: std.mem.Allocator, screen_width: c_int, screen_height: c_int, rec: *recorder.Recorder) Server {
@@ -42,6 +46,7 @@ pub const Server = struct {
             .screen = .{ .width = screen_width, .height = screen_height },
             .running = false,
             .rec = rec,
+            .poll_thread = null,
         };
     }
 
@@ -91,11 +96,30 @@ pub const Server = struct {
         _ = win32.ioctlsocket(self.socket, win32.FIONBIO, &mode);
 
         self.running = true;
+
+        // Start poll thread
+        active_server = self;
+        self.poll_thread = win32.CreateThread(
+            null,
+            0,
+            pollThreadProc,
+            null,
+            0,
+            null,
+        );
     }
 
     /// Stop the HTTP server
     pub fn stop(self: *Server) void {
         self.running = false;
+
+        // Wait for poll thread to finish
+        if (self.poll_thread) |thread| {
+            _ = win32.WaitForSingleObject(thread, 2000);
+            self.poll_thread = null;
+        }
+        active_server = null;
+
         if (self.socket != win32.INVALID_SOCKET) {
             _ = win32.closesocket(self.socket);
             self.socket = win32.INVALID_SOCKET;
@@ -118,6 +142,10 @@ pub const Server = struct {
 
         const client = win32.accept(self.socket, &client_addr, &client_addr_len);
         if (client == win32.INVALID_SOCKET) return;
+
+        // Set receive timeout on client socket (5 seconds)
+        var timeout: u32 = 5000;
+        _ = win32.setsockopt(client, win32.SOL_SOCKET, win32.SO_RCVTIMEO, @ptrCast(&timeout), @sizeOf(u32));
 
         // Read request
         var buf: [4096]u8 = undefined;
@@ -394,6 +422,20 @@ pub const Server = struct {
 };
 
 // ═══════════════════════════════════════════════════════════════════════
+//  Poll Thread
+// ═══════════════════════════════════════════════════════════════════════
+
+fn pollThreadProc(_: ?*anyopaque) callconv(.winapi) u32 {
+    while (true) {
+        const server = active_server orelse break;
+        if (!server.running) break;
+        server.poll();
+        win32.Sleep(10);
+    }
+    return 0;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 //  Static Route Handlers (don't need self)
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -433,6 +475,7 @@ fn sendJson(client: win32.SOCKET, status: u16, body: []const u8) void {
         "HTTP/1.1 {d} OK\r\n" ++
             "Content-Type: application/json\r\n" ++
             "Content-Length: {d}\r\n" ++
+            "Connection: close\r\n" ++
             "Access-Control-Allow-Origin: *\r\n" ++
             "\r\n" ++
             "{s}",
@@ -448,6 +491,7 @@ fn sendBinary(client: win32.SOCKET, content_type: []const u8, data: []const u8) 
         "HTTP/1.1 200 OK\r\n" ++
             "Content-Type: {s}\r\n" ++
             "Content-Length: {d}\r\n" ++
+            "Connection: close\r\n" ++
             "Access-Control-Allow-Origin: *\r\n" ++
             "\r\n",
         .{ content_type, data.len },
@@ -465,6 +509,7 @@ fn sendError(client: win32.SOCKET, status: u16, message: []const u8) void {
         "HTTP/1.1 {d} Error\r\n" ++
             "Content-Type: application/json\r\n" ++
             "Content-Length: {d}\r\n" ++
+            "Connection: close\r\n" ++
             "Access-Control-Allow-Origin: *\r\n" ++
             "\r\n" ++
             "{s}",

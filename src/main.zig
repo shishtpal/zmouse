@@ -141,11 +141,6 @@ pub fn main(init: std.process.Init) !void {
     var line_buf: [256]u8 = undefined;
 
     while (true) {
-        // Poll HTTP server
-        if (server.isRunning()) {
-            server.poll();
-        }
-
         std.debug.print("> ", .{});
 
         const line_opt = readLine(&reader, &line_buf) catch {
