@@ -191,6 +191,18 @@ pub const Server = struct {
 
     /// Route request to appropriate handler
     fn routeRequest(self: *Server, client: win32.SOCKET, method: []const u8, path: []const u8, query: []const u8, body: []const u8) void {
+        // Handle CORS preflight requests
+        if (std.mem.eql(u8, method, "OPTIONS")) {
+            sendCorsPreflightResponse(client);
+            return;
+        }
+
+        // Serve UI
+        if (std.mem.eql(u8, path, "/ui") or std.mem.eql(u8, path, "/ui/")) {
+            serveUi(client);
+            return;
+        }
+
         if (std.mem.eql(u8, path, "/")) {
             sendJson(client, 200, "{\"name\":\"zmouse\",\"version\":\"1.0\"}");
         } else if (std.mem.eql(u8, path, "/api/position")) {
@@ -303,30 +315,33 @@ pub const Server = struct {
         };
         defer shot.deinit();
 
+        // Parse quality from query string (default 75)
+        const quality = parseQueryInt(query, "quality") orelse 75;
+
         if (std.mem.indexOf(u8, query, "base64") != null) {
-            const bmp_data = screenshot.encodeBmp(&shot, self.allocator) orelse {
-                sendError(client, 500, "Could not encode BMP");
+            // Use JPEG for base64 (much smaller)
+            const jpeg_data = screenshot.encodeJpeg(&shot, self.allocator, @intCast(quality)) orelse {
+                sendError(client, 500, "Could not encode JPEG");
                 return;
             };
-            defer self.allocator.free(bmp_data);
+            defer self.allocator.free(jpeg_data);
 
-            const b64 = screenshot.encodeBase64(bmp_data, self.allocator) catch {
+            const b64 = screenshot.encodeBase64(jpeg_data, self.allocator) catch {
                 sendError(client, 500, "Could not encode base64");
                 return;
             };
             defer self.allocator.free(b64);
 
-            var buf: [1024]u8 = undefined;
-            const json = std.fmt.bufPrint(&buf, "{{\"image\":\"{s}\"}}", .{b64}) catch return;
-            sendJson(client, 200, json);
+            sendText(client, b64);
         } else {
-            const bmp_data = screenshot.encodeBmp(&shot, self.allocator) orelse {
-                sendError(client, 500, "Could not encode BMP");
+            // Binary output - use JPEG too
+            const jpeg_data = screenshot.encodeJpeg(&shot, self.allocator, @intCast(quality)) orelse {
+                sendError(client, 500, "Could not encode JPEG");
                 return;
             };
-            defer self.allocator.free(bmp_data);
+            defer self.allocator.free(jpeg_data);
 
-            sendBinary(client, "image/bmp", bmp_data);
+            sendBinary(client, "image/jpeg", jpeg_data);
         }
     }
 
@@ -485,6 +500,22 @@ fn sendJson(client: win32.SOCKET, status: u16, body: []const u8) void {
     _ = win32.send(client, response.ptr, @intCast(response.len), 0);
 }
 
+fn sendText(client: win32.SOCKET, data: []const u8) void {
+    var header_buf: [512]u8 = undefined;
+    const header = std.fmt.bufPrint(&header_buf,
+        "HTTP/1.1 200 OK\r\n" ++
+            "Content-Type: text/plain\r\n" ++
+            "Content-Length: {d}\r\n" ++
+            "Connection: close\r\n" ++
+            "Access-Control-Allow-Origin: *\r\n" ++
+            "\r\n",
+        .{data.len},
+    ) catch return;
+
+    _ = win32.send(client, header.ptr, @intCast(header.len), 0);
+    _ = win32.send(client, data.ptr, @intCast(data.len), 0);
+}
+
 fn sendBinary(client: win32.SOCKET, content_type: []const u8, data: []const u8) void {
     var header_buf: [512]u8 = undefined;
     const header = std.fmt.bufPrint(&header_buf,
@@ -499,6 +530,35 @@ fn sendBinary(client: win32.SOCKET, content_type: []const u8, data: []const u8) 
 
     _ = win32.send(client, header.ptr, @intCast(header.len), 0);
     _ = win32.send(client, data.ptr, @intCast(data.len), 0);
+}
+
+fn sendCorsPreflightResponse(client: win32.SOCKET) void {
+    const response =
+        "HTTP/1.1 204 No Content\r\n" ++
+        "Access-Control-Allow-Origin: *\r\n" ++
+        "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" ++
+        "Access-Control-Allow-Headers: Content-Type\r\n" ++
+        "Access-Control-Max-Age: 86400\r\n" ++
+        "Connection: close\r\n" ++
+        "\r\n";
+
+    _ = win32.send(client, response.ptr, @intCast(response.len), 0);
+}
+
+fn serveUi(client: win32.SOCKET) void {
+    const html = @embedFile("ui_html");
+    var header_buf: [512]u8 = undefined;
+    const header = std.fmt.bufPrint(&header_buf,
+        "HTTP/1.1 200 OK\r\n" ++
+            "Content-Type: text/html; charset=utf-8\r\n" ++
+            "Content-Length: {d}\r\n" ++
+            "Connection: close\r\n" ++
+            "\r\n",
+        .{html.len},
+    ) catch return;
+
+    _ = win32.send(client, header.ptr, @intCast(header.len), 0);
+    _ = win32.send(client, html.ptr, @intCast(html.len), 0);
 }
 
 fn sendError(client: win32.SOCKET, status: u16, message: []const u8) void {
@@ -546,4 +606,19 @@ fn parseJsonString(body: []const u8, key: []const u8) ?[]const u8 {
 
     const end = std.mem.indexOfPos(u8, body, val_start, "\"") orelse return null;
     return body[val_start..end];
+}
+
+fn parseQueryInt(query: []const u8, key: []const u8) ?i32 {
+    var search_buf: [64]u8 = undefined;
+    const search = std.fmt.bufPrint(&search_buf, "{s}=", .{key}) catch return null;
+    const key_pos = std.mem.indexOf(u8, query, search) orelse return null;
+    const val_start = key_pos + search.len;
+
+    var end = val_start;
+    while (end < query.len and query[end] >= '0' and query[end] <= '9') {
+        end += 1;
+    }
+
+    if (end == val_start) return null;
+    return std.fmt.parseInt(i32, query[val_start..end], 10) catch null;
 }

@@ -393,3 +393,176 @@ pub extern "gdi32" fn DeleteObject(
 pub extern "gdi32" fn DeleteDC(
     hDC: HDC,
 ) callconv(.winapi) c_int;
+
+pub extern "gdi32" fn CreateDIBSection(
+    hdc: ?HDC,
+    pbmi: *const BITMAPINFO,
+    usage: u32,
+    ppvBits: *?*anyopaque,
+    hSection: ?HANDLE,
+    offset: u32,
+) callconv(.winapi) ?HBITMAP;
+
+// ═══════════════════════════════════════════════════════════════════════
+//  GDI+ types and constants (for JPEG encoding)
+// ═══════════════════════════════════════════════════════════════════════
+
+pub const GpStatus = enum(c_int) {
+    Ok = 0,
+    GenericError = 1,
+    InvalidParameter = 2,
+    OutOfMemory = 3,
+    ObjectBusy = 4,
+    InsufficientBuffer = 5,
+    NotImplemented = 6,
+    Win32Error = 7,
+    WrongState = 8,
+    Aborted = 9,
+    FileNotFound = 10,
+    ValueOverflow = 11,
+    AccessDenied = 12,
+    UnknownImageFormat = 13,
+    FontFamilyNotFound = 14,
+    FontStyleNotFound = 15,
+    NotTrueTypeFont = 16,
+    UnsupportedGdiplusVersion = 17,
+    GdiplusNotInitialized = 18,
+    PropertyNotFound = 19,
+    PropertyNotSupported = 20,
+    ProfileNotFound = 21,
+};
+
+pub const GdiplusStartupInput = extern struct {
+    GdiplusVersion: u32 = 1,
+    DebugEventCallback: ?*anyopaque = null,
+    SuppressBackgroundThread: c_int = 0,
+    SuppressExternalCodecs: c_int = 0,
+};
+
+pub const GdiplusStartupOutput = extern struct {
+    NotificationHook: ?*anyopaque = null,
+    NotificationUnhook: ?*anyopaque = null,
+};
+
+pub const GUID = extern struct {
+    Data1: u32,
+    Data2: u16,
+    Data3: u16,
+    Data4: [8]u8,
+};
+
+pub const CLSID = GUID;
+
+pub const EncoderParameter = extern struct {
+    Guid: GUID,
+    NumberOfValues: u32,
+    Type: u32,
+    Value: ?*anyopaque,
+};
+
+pub const EncoderParameters = extern struct {
+    Count: u32,
+    Parameter: [1]EncoderParameter,
+};
+
+pub const GpBitmap = opaque {};
+pub const GpImage = opaque {};
+pub const IStream = opaque {};
+
+// Encoder parameter types
+pub const EncoderParameterValueTypeLong: u32 = 4;
+
+// JPEG encoder CLSID: {557CF401-1A04-11D3-9A73-0000F81EF32E}
+pub const CLSID_JpegEncoder = CLSID{
+    .Data1 = 0x557CF401,
+    .Data2 = 0x1A04,
+    .Data3 = 0x11D3,
+    .Data4 = .{ 0x9A, 0x73, 0x00, 0x00, 0xF8, 0x1E, 0xF3, 0x2E },
+};
+
+// Encoder quality GUID: {1D5BE4B5-FA4A-452D-9CDD-5DB35105E7EB}
+pub const EncoderQuality = GUID{
+    .Data1 = 0x1D5BE4B5,
+    .Data2 = 0xFA4A,
+    .Data3 = 0x452D,
+    .Data4 = .{ 0x9C, 0xDD, 0x5D, 0xB3, 0x51, 0x05, 0xE7, 0xEB },
+};
+
+// ═══════════════════════════════════════════════════════════════════════
+//  GDI+ imports (gdiplus.dll)
+// ═══════════════════════════════════════════════════════════════════════
+
+pub extern "gdiplus" fn GdiplusStartup(
+    token: *usize,
+    input: *const GdiplusStartupInput,
+    output: ?*GdiplusStartupOutput,
+) callconv(.winapi) GpStatus;
+
+pub extern "gdiplus" fn GdiplusShutdown(
+    token: usize,
+) callconv(.winapi) void;
+
+pub extern "gdiplus" fn GdipCreateBitmapFromHBITMAP(
+    hbm: HBITMAP,
+    hpal: ?*anyopaque,
+    bitmap: **GpBitmap,
+) callconv(.winapi) GpStatus;
+
+pub extern "gdiplus" fn GdipDisposeImage(
+    image: *GpImage,
+) callconv(.winapi) GpStatus;
+
+pub extern "gdiplus" fn GdipSaveImageToStream(
+    image: *GpImage,
+    stream: *IStream,
+    clsidEncoder: *const CLSID,
+    encoderParams: ?*const EncoderParameters,
+) callconv(.winapi) GpStatus;
+
+// ═══════════════════════════════════════════════════════════════════════
+//  OLE/COM imports for IStream (ole32.dll)
+// ═══════════════════════════════════════════════════════════════════════
+
+pub const HGLOBAL = *anyopaque;
+
+pub extern "ole32" fn CreateStreamOnHGlobal(
+    hGlobal: ?HGLOBAL,
+    fDeleteOnRelease: c_int,
+    ppstm: **IStream,
+) callconv(.winapi) i32;
+
+pub extern "kernel32" fn GlobalAlloc(
+    uFlags: u32,
+    dwBytes: usize,
+) callconv(.winapi) ?HGLOBAL;
+
+pub extern "kernel32" fn GlobalFree(
+    hMem: HGLOBAL,
+) callconv(.winapi) ?HGLOBAL;
+
+pub extern "kernel32" fn GlobalLock(
+    hMem: HGLOBAL,
+) callconv(.winapi) ?*anyopaque;
+
+pub extern "kernel32" fn GlobalUnlock(
+    hMem: HGLOBAL,
+) callconv(.winapi) c_int;
+
+pub extern "kernel32" fn GlobalSize(
+    hMem: HGLOBAL,
+) callconv(.winapi) usize;
+
+pub const GMEM_MOVEABLE: u32 = 0x0002;
+
+// IStream VTable for Release and GetHGlobalFromStream
+pub const IStreamVtbl = extern struct {
+    QueryInterface: *const fn (*IStream, *const GUID, **anyopaque) callconv(.winapi) i32,
+    AddRef: *const fn (*IStream) callconv(.winapi) u32,
+    Release: *const fn (*IStream) callconv(.winapi) u32,
+    // ... more methods we don't need
+};
+
+pub extern "ole32" fn GetHGlobalFromStream(
+    pstm: *IStream,
+    phglobal: *HGLOBAL,
+) callconv(.winapi) i32;

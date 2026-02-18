@@ -25,6 +25,9 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    // Allow @embedFile to access web/index.html for UI serving
+    exe.root_module.addAnonymousImport("ui_html", .{ .root_source_file = b.path("web/index.html") });
+
     b.installArtifact(exe);
 
     // ═══════════════════════════════════════════════════════════════════

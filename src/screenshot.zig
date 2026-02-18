@@ -145,6 +145,136 @@ pub fn encodeBmp(screenshot: *const Screenshot, alloc: std.mem.Allocator) ?[]u8 
     return bmp;
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+//  JPEG Encoding via GDI+
+// ═══════════════════════════════════════════════════════════════════════
+
+var gdiplus_token: usize = 0;
+var gdiplus_initialized: bool = false;
+
+/// Initialize GDI+ (call once at startup)
+pub fn initGdiPlus() bool {
+    if (gdiplus_initialized) return true;
+
+    var input = win32.GdiplusStartupInput{};
+    const status = win32.GdiplusStartup(&gdiplus_token, &input, null);
+    if (status == .Ok) {
+        gdiplus_initialized = true;
+        return true;
+    }
+    return false;
+}
+
+/// Shutdown GDI+ (call at cleanup)
+pub fn shutdownGdiPlus() void {
+    if (gdiplus_initialized) {
+        win32.GdiplusShutdown(gdiplus_token);
+        gdiplus_initialized = false;
+    }
+}
+
+/// Encode screenshot as JPEG using GDI+
+/// quality: 0-100 (default 85)
+/// Returns owned slice that must be freed by caller
+pub fn encodeJpeg(screenshot: *const Screenshot, alloc: std.mem.Allocator, quality: u32) ?[]u8 {
+    if (!initGdiPlus()) return null;
+
+    const width = screenshot.width;
+    const height = screenshot.height;
+
+    // Get screen DC for creating compatible bitmap
+    const screen_dc = win32.GetDC(null) orelse return null;
+    defer _ = win32.ReleaseDC(null, screen_dc);
+
+    // Create memory DC
+    const mem_dc = win32.CreateCompatibleDC(screen_dc) orelse return null;
+    defer _ = win32.DeleteDC(mem_dc);
+
+    // Create DIB section with our pixel data
+    var bmi: win32.BITMAPINFO = .{
+        .bmiHeader = .{
+            .biSize = @sizeOf(win32.BITMAPINFOHEADER),
+            .biWidth = @intCast(width),
+            .biHeight = -@as(c_long, @intCast(height)), // Top-down
+            .biPlanes = 1,
+            .biBitCount = 32,
+            .biCompression = win32.BI_RGB,
+            .biSizeImage = 0,
+            .biXPelsPerMeter = 0,
+            .biYPelsPerMeter = 0,
+            .biClrUsed = 0,
+            .biClrImportant = 0,
+        },
+        .bmiColors = .{0},
+    };
+
+    var bits_ptr: ?*anyopaque = null;
+    const dib = win32.CreateDIBSection(screen_dc, &bmi, win32.DIB_RGB_COLORS, &bits_ptr, null, 0) orelse return null;
+    defer _ = win32.DeleteObject(@ptrCast(dib));
+
+    // Copy our pixels to the DIB
+    if (bits_ptr) |ptr| {
+        const dest: [*]u8 = @ptrCast(ptr);
+        @memcpy(dest[0..screenshot.pixels.len], screenshot.pixels);
+    } else {
+        return null;
+    }
+
+    // Create GDI+ bitmap from HBITMAP
+    var gp_bitmap: *win32.GpBitmap = undefined;
+    if (win32.GdipCreateBitmapFromHBITMAP(dib, null, &gp_bitmap) != .Ok) {
+        return null;
+    }
+    defer _ = win32.GdipDisposeImage(@ptrCast(gp_bitmap));
+
+    // Create IStream for output
+    var stream: *win32.IStream = undefined;
+    if (win32.CreateStreamOnHGlobal(null, 1, &stream) != 0) {
+        return null;
+    }
+    defer {
+        // Get vtable and call Release
+        const vtbl_ptr: *const *const win32.IStreamVtbl = @ptrCast(@alignCast(stream));
+        _ = vtbl_ptr.*.Release(stream);
+    }
+
+    // Set up encoder parameters for quality
+    var quality_value: u32 = if (quality > 100) 100 else quality;
+    var encoder_params = win32.EncoderParameters{
+        .Count = 1,
+        .Parameter = .{.{
+            .Guid = win32.EncoderQuality,
+            .NumberOfValues = 1,
+            .Type = win32.EncoderParameterValueTypeLong,
+            .Value = @ptrCast(&quality_value),
+        }},
+    };
+
+    // Save to stream as JPEG
+    if (win32.GdipSaveImageToStream(@ptrCast(gp_bitmap), stream, &win32.CLSID_JpegEncoder, &encoder_params) != .Ok) {
+        return null;
+    }
+
+    // Get the data from stream
+    var hglobal: win32.HGLOBAL = undefined;
+    if (win32.GetHGlobalFromStream(stream, &hglobal) != 0) {
+        return null;
+    }
+
+    const size = win32.GlobalSize(hglobal);
+    if (size == 0) return null;
+
+    const locked = win32.GlobalLock(hglobal) orelse return null;
+    defer _ = win32.GlobalUnlock(hglobal);
+
+    // Copy to our allocator
+    const result = alloc.alloc(u8, size) catch return null;
+    const src: [*]const u8 = @ptrCast(locked);
+    @memcpy(result, src[0..size]);
+
+    return result;
+}
+
 /// Base64 encoding table
 const BASE64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 

@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZMouse Test Frontend</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a2e;
+            color: #eee;
+        }
+        h1 {
+            text-align: center;
+            color: #00d9ff;
+            margin-bottom: 10px;
+        }
+        .server-config {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #16213e;
+            border-radius: 8px;
+        }
+        .server-config input {
+            padding: 8px 12px;
+            border: 1px solid #444;
+            border-radius: 4px;
+            background: #0f0f23;
+            color: #fff;
+            width: 200px;
+        }
+        .server-config button {
+            padding: 8px 20px;
+        }
+        .status {
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 14px;
+        }
+        .status.connected {
+            background: #28a745;
+        }
+        .status.disconnected {
+            background: #dc3545;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        .card {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #333;
+        }
+        .card h2 {
+            margin-top: 0;
+            color: #00d9ff;
+            font-size: 18px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #aaa;
+            font-size: 14px;
+        }
+        .form-row {
+            display: flex;
+            gap: 10px;
+        }
+        .form-row .form-group {
+            flex: 1;
+        }
+        input, select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #444;
+            border-radius: 6px;
+            background: #0f0f23;
+            color: #fff;
+            font-size: 14px;
+        }
+        input:focus, select:focus {
+            outline: none;
+            border-color: #00d9ff;
+        }
+        button {
+            background: #00d9ff;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        button:hover {
+            background: #00b8d9;
+        }
+        button:active {
+            transform: scale(0.98);
+        }
+        button.secondary {
+            background: #444;
+            color: #fff;
+        }
+        button.secondary:hover {
+            background: #555;
+        }
+        button.danger {
+            background: #dc3545;
+            color: #fff;
+        }
+        button.danger:hover {
+            background: #c82333;
+        }
+        button.success {
+            background: #28a745;
+            color: #fff;
+        }
+        button.success:hover {
+            background: #218838;
+        }
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .btn-group button {
+            flex: 1;
+            min-width: 80px;
+        }
+        .result {
+            margin-top: 15px;
+            padding: 12px;
+            background: #0f0f23;
+            border-radius: 6px;
+            font-family: 'Consolas', monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 150px;
+            overflow-y: auto;
+            border: 1px solid #333;
+        }
+        .result.error {
+            border-color: #dc3545;
+            color: #ff6b6b;
+        }
+        .result.success {
+            border-color: #28a745;
+            color: #6bff6b;
+        }
+        .position-display {
+            font-size: 24px;
+            text-align: center;
+            padding: 20px;
+            background: #0f0f23;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+        .position-display span {
+            color: #00d9ff;
+            font-weight: bold;
+        }
+        .recording-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 15px;
+            background: #0f0f23;
+            border-radius: 6px;
+            margin-bottom: 15px;
+        }
+        .recording-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #666;
+        }
+        .recording-indicator.active {
+            background: #dc3545;
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .screenshot-container {
+            text-align: center;
+        }
+        .screenshot-container img {
+            max-width: 100%;
+            border-radius: 8px;
+            border: 1px solid #333;
+            margin-top: 10px;
+        }
+        .key-input {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+        }
+        .key-input .form-group:first-child {
+            flex: 2;
+        }
+        .key-input .form-group:last-child {
+            flex: 1;
+        }
+        .common-keys {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-top: 10px;
+        }
+        .common-keys button {
+            padding: 5px 10px;
+            font-size: 12px;
+            background: #333;
+            color: #fff;
+        }
+        .common-keys button:hover {
+            background: #444;
+        }
+        .log-panel {
+            grid-column: 1 / -1;
+        }
+        .log-content {
+            height: 200px;
+            overflow-y: auto;
+            background: #0f0f23;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+            border: 1px solid #333;
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #222;
+        }
+        .log-entry .time {
+            color: #666;
+        }
+        .log-entry .method {
+            font-weight: bold;
+        }
+        .log-entry .method.GET { color: #28a745; }
+        .log-entry .method.POST { color: #ffc107; }
+        .log-entry .url { color: #00d9ff; }
+        .log-entry .status-code { font-weight: bold; }
+        .log-entry .status-code.ok { color: #28a745; }
+        .log-entry .status-code.error { color: #dc3545; }
+    </style>
+</head>
+<body>
+    <h1>ZMouse Test Frontend</h1>
+    
+    <div class="server-config">
+        <label>Server URL:</label>
+        <input type="text" id="serverUrl" value="" placeholder="Leave empty for same origin" />
+        <button onclick="checkConnection()">Connect</button>
+        <span id="connectionStatus" class="status disconnected">Disconnected</span>
+    </div>
+
+    <div class="grid">
+        <!-- Mouse Position -->
+        <div class="card">
+            <h2>Mouse Position</h2>
+            <div class="position-display">
+                X: <span id="posX">--</span>, Y: <span id="posY">--</span>
+            </div>
+            <div class="btn-group">
+                <button onclick="getPosition()">Get Position</button>
+                <button class="secondary" onclick="startPolling()">Auto Refresh</button>
+                <button class="danger" onclick="stopPolling()">Stop</button>
+            </div>
+            <div id="positionResult" class="result" style="display:none;"></div>
+        </div>
+
+        <!-- Mouse Move -->
+        <div class="card">
+            <h2>Move Mouse</h2>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>X Coordinate</label>
+                    <input type="number" id="moveX" placeholder="800" value="500" />
+                </div>
+                <div class="form-group">
+                    <label>Y Coordinate</label>
+                    <input type="number" id="moveY" placeholder="400" value="300" />
+                </div>
+            </div>
+            <button onclick="moveMouse()">Move Mouse</button>
+            <div id="moveResult" class="result" style="display:none;"></div>
+        </div>
+
+        <!-- Mouse Click -->
+        <div class="card">
+            <h2>Mouse Click</h2>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>X Coordinate</label>
+                    <input type="number" id="clickX" placeholder="100" value="500" />
+                </div>
+                <div class="form-group">
+                    <label>Y Coordinate</label>
+                    <input type="number" id="clickY" placeholder="100" value="300" />
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Button Type</label>
+                <select id="clickButton">
+                    <option value="left">Left Click</option>
+                    <option value="right">Right Click</option>
+                    <option value="double">Double Click</option>
+                </select>
+            </div>
+            <button onclick="clickMouse()">Click</button>
+            <div id="clickResult" class="result" style="display:none;"></div>
+        </div>
+
+        <!-- Mouse Scroll -->
+        <div class="card">
+            <h2>Mouse Scroll</h2>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Amount</label>
+                    <input type="number" id="scrollAmount" placeholder="5" value="3" />
+                </div>
+                <div class="form-group">
+                    <label>Direction</label>
+                    <select id="scrollDirection">
+                        <option value="up">Up</option>
+                        <option value="down">Down</option>
+                    </select>
+                </div>
+            </div>
+            <button onclick="scrollMouse()">Scroll</button>
+            <div id="scrollResult" class="result" style="display:none;"></div>
+        </div>
+
+        <!-- Keyboard -->
+        <div class="card">
+            <h2>Keyboard Input</h2>
+            <div class="key-input">
+                <div class="form-group">
+                    <label>Virtual Key Code</label>
+                    <input type="number" id="keyCode" placeholder="65 (A)" value="65" />
+                </div>
+                <div class="form-group">
+                    <label>Action</label>
+                    <select id="keyAction">
+                        <option value="press">Press (down+up)</option>
+                        <option value="down">Key Down</option>
+                        <option value="up">Key Up</option>
+                    </select>
+                </div>
+            </div>
+            <div class="common-keys">
+                <button onclick="setKey(13)">Enter</button>
+                <button onclick="setKey(32)">Space</button>
+                <button onclick="setKey(9)">Tab</button>
+                <button onclick="setKey(27)">Esc</button>
+                <button onclick="setKey(8)">Backspace</button>
+                <button onclick="setKey(37)">Left</button>
+                <button onclick="setKey(38)">Up</button>
+                <button onclick="setKey(39)">Right</button>
+                <button onclick="setKey(40)">Down</button>
+                <button onclick="setKey(65)">A</button>
+                <button onclick="setKey(17)">Ctrl</button>
+                <button onclick="setKey(18)">Alt</button>
+            </div>
+            <div style="margin-top: 15px;">
+                <button onclick="sendKey()">Send Key</button>
+            </div>
+            <div id="keyResult" class="result" style="display:none;"></div>
+        </div>
+
+        <!-- Screenshot -->
+        <div class="card">
+            <h2>Screenshot</h2>
+            <div class="screenshot-container">
+                <button onclick="takeScreenshot()">Capture Screenshot</button>
+                <img id="screenshotImg" style="display:none;" />
+            </div>
+            <div id="screenshotResult" class="result" style="display:none;"></div>
+        </div>
+
+        <!-- Recording -->
+        <div class="card">
+            <h2>Recording</h2>
+            <div class="recording-status">
+                <div id="recordingIndicator" class="recording-indicator"></div>
+                <span>Status: <strong id="recordingStatusText">Unknown</strong></span>
+                <span>Events: <strong id="recordingEvents">0</strong></span>
+            </div>
+            <div class="btn-group" style="margin-bottom: 15px;">
+                <button class="success" onclick="startRecording()">Start</button>
+                <button class="danger" onclick="stopRecording()">Stop</button>
+                <button class="secondary" onclick="getRecordingStatus()">Refresh</button>
+            </div>
+            <div class="form-group">
+                <label>Filename</label>
+                <input type="text" id="recordingFilename" placeholder="macro.json" value="macro.json" />
+            </div>
+            <div class="btn-group">
+                <button class="secondary" onclick="saveRecording()">Save</button>
+                <button class="secondary" onclick="loadRecording()">Load</button>
+                <button onclick="playRecording()">Play</button>
+            </div>
+            <div id="recordingResult" class="result" style="display:none;"></div>
+        </div>
+
+        <!-- Request Log -->
+        <div class="card log-panel">
+            <h2>Request Log</h2>
+            <div class="btn-group" style="margin-bottom: 10px;">
+                <button class="secondary" onclick="clearLog()">Clear Log</button>
+            </div>
+            <div id="logContent" class="log-content"></div>
+        </div>
+    </div>
+
+    <script>
+        let pollingInterval = null;
+
+        function getServerUrl() {
+            return document.getElementById('serverUrl').value.replace(/\/$/, '');
+        }
+
+        function log(method, url, status, response) {
+            const logContent = document.getElementById('logContent');
+            const time = new Date().toLocaleTimeString();
+            const statusClass = status >= 200 && status < 300 ? 'ok' : 'error';
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `<span class="time">[${time}]</span> <span class="method ${method}">${method}</span> <span class="url">${url}</span> - <span class="status-code ${statusClass}">${status}</span>: ${JSON.stringify(response)}`;
+            logContent.insertBefore(entry, logContent.firstChild);
+        }
+
+        function clearLog() {
+            document.getElementById('logContent').innerHTML = '';
+        }
+
+        function showResult(elementId, data, isError = false) {
+            const el = document.getElementById(elementId);
+            el.style.display = 'block';
+            el.className = `result ${isError ? 'error' : 'success'}`;
+            el.textContent = typeof data === 'object' ? JSON.stringify(data, null, 2) : data;
+        }
+
+        async function apiCall(method, endpoint, body = null) {
+            const url = getServerUrl() + endpoint;
+            const options = {
+                method,
+                headers: { 'Content-Type': 'application/json' }
+            };
+            if (body) {
+                options.body = JSON.stringify(body);
+            }
+
+            try {
+                const response = await fetch(url, options);
+                const text = await response.text();
+                let data;
+                try {
+                    data = JSON.parse(text);
+                } catch {
+                    data = text;
+                }
+                log(method, endpoint, response.status, data);
+                return { ok: response.ok, status: response.status, data };
+            } catch (error) {
+                log(method, endpoint, 0, error.message);
+                return { ok: false, status: 0, data: { error: error.message } };
+            }
+        }
+
+        async function checkConnection() {
+            const result = await apiCall('GET', '/');
+            const statusEl = document.getElementById('connectionStatus');
+            if (result.ok) {
+                statusEl.textContent = 'Connected';
+                statusEl.className = 'status connected';
+            } else {
+                statusEl.textContent = 'Disconnected';
+                statusEl.className = 'status disconnected';
+            }
+        }
+
+        async function getPosition() {
+            const result = await apiCall('GET', '/api/position');
+            if (result.ok && result.data) {
+                document.getElementById('posX').textContent = result.data.x ?? '--';
+                document.getElementById('posY').textContent = result.data.y ?? '--';
+            }
+            showResult('positionResult', result.data, !result.ok);
+        }
+
+        function startPolling() {
+            if (pollingInterval) return;
+            pollingInterval = setInterval(getPosition, 100);
+        }
+
+        function stopPolling() {
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+                pollingInterval = null;
+            }
+        }
+
+        async function moveMouse() {
+            const x = parseInt(document.getElementById('moveX').value);
+            const y = parseInt(document.getElementById('moveY').value);
+            const result = await apiCall('POST', '/api/move', { x, y });
+            showResult('moveResult', result.data, !result.ok);
+        }
+
+        async function clickMouse() {
+            const x = parseInt(document.getElementById('clickX').value);
+            const y = parseInt(document.getElementById('clickY').value);
+            const button = document.getElementById('clickButton').value;
+            const result = await apiCall('POST', '/api/click', { x, y, button });
+            showResult('clickResult', result.data, !result.ok);
+        }
+
+        async function scrollMouse() {
+            const amount = parseInt(document.getElementById('scrollAmount').value);
+            const direction = document.getElementById('scrollDirection').value;
+            const result = await apiCall('POST', '/api/scroll', { amount, direction });
+            showResult('scrollResult', result.data, !result.ok);
+        }
+
+        function setKey(code) {
+            document.getElementById('keyCode').value = code;
+        }
+
+        async function sendKey() {
+            const key = parseInt(document.getElementById('keyCode').value);
+            const action = document.getElementById('keyAction').value;
+            const result = await apiCall('POST', '/api/keyboard', { key, action });
+            showResult('keyResult', result.data, !result.ok);
+        }
+
+        async function takeScreenshot() {
+            const url = getServerUrl() + '/api/screenshot?base64';
+            try {
+                const response = await fetch(url);
+                if (response.ok) {
+                    const base64 = await response.text();
+                    const img = document.getElementById('screenshotImg');
+                    img.src = 'data:image/jpeg;base64,' + base64;
+                    img.style.display = 'block';
+                    log('GET', '/api/screenshot?base64', 200, 'Image received');
+                    showResult('screenshotResult', 'Screenshot captured successfully');
+                } else {
+                    log('GET', '/api/screenshot?base64', response.status, 'Failed');
+                    showResult('screenshotResult', 'Failed to capture screenshot', true);
+                }
+            } catch (error) {
+                log('GET', '/api/screenshot?base64', 0, error.message);
+                showResult('screenshotResult', error.message, true);
+            }
+        }
+
+        async function getRecordingStatus() {
+            const result = await apiCall('GET', '/api/recording/status');
+            if (result.ok && result.data) {
+                const isRecording = result.data.recording;
+                document.getElementById('recordingStatusText').textContent = isRecording ? 'Recording' : 'Stopped';
+                document.getElementById('recordingEvents').textContent = result.data.events ?? 0;
+                document.getElementById('recordingIndicator').className = `recording-indicator ${isRecording ? 'active' : ''}`;
+            }
+            showResult('recordingResult', result.data, !result.ok);
+        }
+
+        async function startRecording() {
+            const result = await apiCall('POST', '/api/recording/start');
+            showResult('recordingResult', result.data, !result.ok);
+            getRecordingStatus();
+        }
+
+        async function stopRecording() {
+            const result = await apiCall('POST', '/api/recording/stop');
+            showResult('recordingResult', result.data, !result.ok);
+            getRecordingStatus();
+        }
+
+        async function saveRecording() {
+            const filename = document.getElementById('recordingFilename').value;
+            const result = await apiCall('POST', '/api/recording/save', { filename });
+            showResult('recordingResult', result.data, !result.ok);
+        }
+
+        async function loadRecording() {
+            const filename = document.getElementById('recordingFilename').value;
+            const result = await apiCall('POST', '/api/recording/load', { filename });
+            showResult('recordingResult', result.data, !result.ok);
+            getRecordingStatus();
+        }
+
+        async function playRecording() {
+            showResult('recordingResult', 'Playing recording... (this may take a while)');
+            const result = await apiCall('POST', '/api/recording/play');
+            showResult('recordingResult', result.data, !result.ok);
+        }
+
+        // Check connection on load
+        checkConnection();
+    </script>
+</body>
+</html>
