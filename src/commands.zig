@@ -73,6 +73,15 @@ fn executeScrollDown(args: []const u8) !void {
     std.debug.print("  Scrolled down by {d}\n\n", .{n});
 }
 
+/// Execute a get-position command (g)
+fn executeGetPosition() void {
+    if (mouse.getPosition()) |pos| {
+        std.debug.print("  Mouse position: ({d}, {d})\n\n", .{ pos.x, pos.y });
+    } else {
+        std.debug.print("  Error: Could not get mouse position\n\n", .{});
+    }
+}
+
 /// Parse and dispatch a single trimmed command string
 pub fn runCommand(
     cmd: []const u8,
@@ -80,6 +89,12 @@ pub fn runCommand(
     sh: c_int,
 ) !void {
     if (cmd.len == 0) return;
+
+    // Single-char commands
+    if (std.mem.eql(u8, cmd, "g")) {
+        executeGetPosition();
+        return;
+    }
 
     // Scroll commands (require at least 3 chars: "sc" or "sd" + digits)
     if (cmd.len >= 3) {
@@ -111,8 +126,8 @@ pub fn printHelp(sw: c_int, sh: c_int) void {
         \\  ─────────────────────────────────────
         \\  m<X>-<Y>   move            c<X>-<Y>   move + left-click
         \\  r<X>-<Y>   move + right    d<X>-<Y>   move + double-click
-        \\  sc<N>      scroll up       sd<N>       scroll down
-        \\  q          quit
+        \\  sc<N>      scroll up       sd<N>      scroll down
+        \\  g          get position    q          quit
         \\
         \\
     , .{ sw, sh });

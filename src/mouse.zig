@@ -55,3 +55,12 @@ pub fn scrollWheel(amount: i32) void {
     }};
     _ = win32.SendInput(1, &buf, @sizeOf(win32.INPUT));
 }
+
+/// Get the current mouse cursor position
+pub fn getPosition() ?struct { x: c_long, y: c_long } {
+    var point: win32.POINT = .{ .x = 0, .y = 0 };
+    if (win32.GetCursorPos(&point) != 0) {
+        return .{ .x = point.x, .y = point.y };
+    }
+    return null;
+}

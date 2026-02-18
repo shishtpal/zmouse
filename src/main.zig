@@ -46,11 +46,11 @@ pub fn main(init: std.process.Init) !void {
     std.debug.print(
         \\
         \\  Mouse Controller  (screen {d} x {d})
-        \\  ---------------------------------------------------------
+        \\  ─────────────────────────────────────
         \\  m<X>-<Y>   move            c<X>-<Y>   move + left-click
         \\  r<X>-<Y>   move + right    d<X>-<Y>   move + double-click
-        \\  sc<N>      scroll up       sd<N>       scroll down
-        \\  q          quit
+        \\  sc<N>      scroll up       sd<N>      scroll down
+        \\  g          get position    q          quit
         \\
         \\
     , .{ screen_width, screen_height });

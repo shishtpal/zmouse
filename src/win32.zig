@@ -25,6 +25,11 @@ pub const WHEEL_DELTA: i32 = 120;
 //  Win32 structures (extern → C ABI layout)
 // ═══════════════════════════════════════════════════════════════════════
 
+pub const POINT = extern struct {
+    x: c_long,
+    y: c_long,
+};
+
 pub const MOUSEINPUT = extern struct {
     dx: i32 = 0,
     dy: i32 = 0,
@@ -61,4 +66,8 @@ pub extern "user32" fn SendInput(
 
 pub extern "user32" fn GetSystemMetrics(
     nIndex: c_int,
+) callconv(.winapi) c_int;
+
+pub extern "user32" fn GetCursorPos(
+    lpPoint: *POINT,
 ) callconv(.winapi) c_int;
