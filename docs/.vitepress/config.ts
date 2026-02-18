@@ -4,6 +4,8 @@ export default defineConfig({
   title: 'ZMouse',
   description: 'A Windows mouse and keyboard controller with recording and HTTP API',
   lang: 'en-US',
+  
+  base: '/zmouse/',
 
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }]
