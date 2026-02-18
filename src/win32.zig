@@ -202,3 +202,184 @@ pub extern "kernel32" fn WaitForSingleObject(
 
 pub const HANDLE = *opaque {};
 pub const INFINITE: u32 = 0xFFFFFFFF;
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Win32 Socket constants and types
+// ═══════════════════════════════════════════════════════════════════════
+
+pub const SOCK_STREAM: i32 = 1;
+pub const AF_INET: i32 = 2;
+pub const IPPROTO_TCP: i32 = 6;
+pub const SOMAXCONN: i32 = 0x7fffffff;
+
+pub const SOCKET = usize;
+pub const INVALID_SOCKET: SOCKET = @bitCast(@as(isize, -1));
+pub const SOCKET_ERROR: i32 = -1;
+
+pub const SOCKADDR_IN = extern struct {
+    sin_family: u16,
+    sin_port: u16,
+    sin_addr: u32,
+    sin_zero: [8]u8 = .{0} ** 8,
+};
+
+pub const WSAData = extern struct {
+    wVersion: u16,
+    wHighVersion: u16,
+    szDescription: [257]u8,
+    szSystemStatus: [129]u8,
+    iMaxSockets: u16,
+    iMaxUdpDg: u16,
+    lpVendorInfo: ?*anyopaque,
+};
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Win32 GDI constants and types (for screenshots)
+// ═══════════════════════════════════════════════════════════════════════
+
+pub const HDC = *opaque {};
+pub const HBITMAP = *opaque {};
+pub const HGDIOBJ = *opaque {};
+
+pub const BI_RGB: u32 = 0;
+pub const DIB_RGB_COLORS: u32 = 0;
+pub const SRCCOPY: u32 = 0x00CC0020;
+
+pub const BITMAPINFOHEADER = extern struct {
+    biSize: u32,
+    biWidth: c_long,
+    biHeight: c_long,
+    biPlanes: u16,
+    biBitCount: u16,
+    biCompression: u32,
+    biSizeImage: u32,
+    biXPelsPerMeter: c_long,
+    biYPelsPerMeter: c_long,
+    biClrUsed: u32,
+    biClrImportant: u32,
+};
+
+pub const BITMAPINFO = extern struct {
+    bmiHeader: BITMAPINFOHEADER,
+    bmiColors: [1]u32, // Placeholder for color table
+};
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Win32 Socket imports (ws2_32.dll)
+// ═══════════════════════════════════════════════════════════════════════
+
+pub extern "ws2_32" fn WSAStartup(
+    wVersionRequired: u16,
+    lpWSAData: *WSAData,
+) callconv(.winapi) i32;
+
+pub extern "ws2_32" fn WSACleanup() callconv(.winapi) i32;
+
+pub extern "ws2_32" fn socket(
+    af: i32,
+    type: i32,
+    protocol: i32,
+) callconv(.winapi) SOCKET;
+
+pub extern "ws2_32" fn bind(
+    s: SOCKET,
+    name: *const SOCKADDR_IN,
+    namelen: i32,
+) callconv(.winapi) i32;
+
+pub extern "ws2_32" fn listen(
+    s: SOCKET,
+    backlog: i32,
+) callconv(.winapi) i32;
+
+pub extern "ws2_32" fn accept(
+    s: SOCKET,
+    addr: ?*SOCKADDR_IN,
+    addrlen: ?*i32,
+) callconv(.winapi) SOCKET;
+
+pub extern "ws2_32" fn recv(
+    s: SOCKET,
+    buf: [*]u8,
+    len: i32,
+    flags: i32,
+) callconv(.winapi) i32;
+
+pub extern "ws2_32" fn send(
+    s: SOCKET,
+    buf: [*]const u8,
+    len: i32,
+    flags: i32,
+) callconv(.winapi) i32;
+
+pub extern "ws2_32" fn closesocket(
+    s: SOCKET,
+) callconv(.winapi) i32;
+
+pub extern "ws2_32" fn ioctlsocket(
+    s: SOCKET,
+    cmd: u32,
+    argp: *u32,
+) callconv(.winapi) i32;
+
+pub const FIONBIO: u32 = 0x8004667E;
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Win32 GDI imports (gdi32.dll and user32.dll)
+// ═══════════════════════════════════════════════════════════════════════
+
+pub extern "user32" fn GetDC(
+    hWnd: ?HWND,
+) callconv(.winapi) ?HDC;
+
+pub extern "user32" fn ReleaseDC(
+    hWnd: ?HWND,
+    hDC: HDC,
+) callconv(.winapi) c_int;
+
+pub extern "user32" fn GetDesktopWindow() callconv(.winapi) ?HWND;
+
+pub extern "gdi32" fn CreateCompatibleDC(
+    hDC: HDC,
+) callconv(.winapi) ?HDC;
+
+pub extern "gdi32" fn CreateCompatibleBitmap(
+    hDC: HDC,
+    width: c_int,
+    height: c_int,
+) callconv(.winapi) ?HBITMAP;
+
+pub extern "gdi32" fn SelectObject(
+    hDC: HDC,
+    hGdiObj: HGDIOBJ,
+) callconv(.winapi) HGDIOBJ;
+
+pub extern "gdi32" fn BitBlt(
+    hDestDC: HDC,
+    x: c_int,
+    y: c_int,
+    nWidth: c_int,
+    nHeight: c_int,
+    hSrcDC: HDC,
+    xSrc: c_int,
+    ySrc: c_int,
+    dwRop: u32,
+) callconv(.winapi) c_int;
+
+pub extern "gdi32" fn GetDIBits(
+    hDC: HDC,
+    hbm: HBITMAP,
+    start: u32,
+    cLines: u32,
+    lpvBits: ?*anyopaque,
+    lpbmi: *BITMAPINFO,
+    usage: u32,
+) callconv(.winapi) c_int;
+
+pub extern "gdi32" fn DeleteObject(
+    hGdiObj: HGDIOBJ,
+) callconv(.winapi) c_int;
+
+pub extern "gdi32" fn DeleteDC(
+    hDC: HDC,
+) callconv(.winapi) c_int;
